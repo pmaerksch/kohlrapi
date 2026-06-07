@@ -1,0 +1,40 @@
+{
+	"name": "pmaerksch/apicaptain",
+	"version": "1.11.0",
+	"description": "Abstract base classes for Symfony API backends — generic CRUD, search, filter, and sort.",
+	"type": "library",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Philip Märksch"
+		}
+	],
+	"require": {
+		"php": ">=8.2",
+		"ext-ctype": "*",
+		"symfony/framework-bundle": "^7.4 || ^8.0",
+		"symfony/monolog-bundle": "^4.0.1",
+		"symfony/serializer": "^7.4 || ^8.0",
+		"symfony/validator": "^7.4 || ^8.0",
+		"symfony/http-foundation": "^7.4 || ^8.0",
+		"symfony/http-kernel": "^7.4 || ^8.0",
+		"symfony/uid": "^7.4 || ^8.0",
+		"doctrine/orm": "^3.6.2",
+		"doctrine/doctrine-bundle": "^3.2.2"
+	},
+	"autoload": {
+		"psr-4": {
+			"pmaerksch\\ApiCaptain\\": "src/"
+		}
+	},
+	"minimum-stability": "stable",
+	"conflict": {
+		"symfony/symfony": "*"
+	},
+	"extra": {
+		"symfony": {
+			"allow-contrib": false,
+			"require": "7.4.*|8.0.*"
+		}
+	}
+}
