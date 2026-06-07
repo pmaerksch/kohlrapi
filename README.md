@@ -1,4 +1,4 @@
-# ApiCaptain
+# kohlrAPI
 
 This is a lightweight Symfony library that helps to build a RESTful API. The name is a play on words and stems from one of the several projects this 
 was developed for/with: [AdCaptain](https://adcaptain.de). I finally decided to create a standalone package combining the many 
@@ -28,12 +28,12 @@ Add the package to your Symfony project via a [Composer path repository](https:/
 "repositories": [
     {
         "type": "path",
-        "url": "packages/apicaptain",
+        "url": "packages/kohlrapi",
         "options": { "symlink": true }
     }
 ],
 "require": {
-    "pmaerksch/apicaptain": "*"
+    "pmaerksch/kohlrapi": "*"
 }
 ```
 
@@ -47,7 +47,7 @@ composer install
 
 ## Classes
 
-All classes live under the `pmaerksch\ApiCaptain` namespace.
+All classes live under the `pmaerksch\Kohlrapi` namespace.
 
 ---
 

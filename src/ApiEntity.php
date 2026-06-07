@@ -9,7 +9,7 @@
  *   - updateFromEntity() — copies all properties except UUID from another instance
  */
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;

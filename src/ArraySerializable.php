@@ -1,6 +1,6 @@
 <?php
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 /**
  * Implemented by entities that serialize themselves to an array, rather than

@@ -20,7 +20,7 @@
  *   - getRandomEntityList — fetch a random list of entity objects (no serialization)
  */
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\KernelInterface;

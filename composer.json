@@ -1,5 +1,5 @@
 {
-	"name": "pmaerksch/apicaptain",
+	"name": "pmaerksch/kohlrapi",
 	"version": "1.11.0",
 	"description": "Abstract base classes for Symfony API backends — generic CRUD, search, filter, and sort.",
 	"type": "library",
@@ -24,7 +24,7 @@
 	},
 	"autoload": {
 		"psr-4": {
-			"pmaerksch\\ApiCaptain\\": "src/"
+			"pmaerksch\\Kohlrapi\\": "src/"
 		}
 	},
 	"minimum-stability": "stable",

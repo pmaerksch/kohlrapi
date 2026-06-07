@@ -1,6 +1,6 @@
 <?php
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 /**
  * Implemented by the user entity to declare whether it may receive detailed API

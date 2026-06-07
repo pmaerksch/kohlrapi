@@ -1,6 +1,6 @@
 <?php
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 use JsonException;
 use Symfony\Component\HttpFoundation\Request;

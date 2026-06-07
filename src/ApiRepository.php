@@ -34,7 +34,7 @@
  * { "field": "fieldKey", "order": "ASC" | "DESC" }
  */
 
-namespace pmaerksch\ApiCaptain;
+namespace pmaerksch\Kohlrapi;
 
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\ORM\QueryBuilder;
