@@ -7,7 +7,7 @@ useful bits from each project and tried to make them reusable for other projects
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
 
 **Author:** Philip Märksch  
-**Version:** 1.11.0  
+**Version:** 1.11.1  
 **License:** MIT
 
 ---
@@ -164,7 +164,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `successResponse($data)` | `200 { message, ...data }` |
 | `createdResponse($data)` | `201 { message, ...data }` |
 | `noContentResponse()` | `204` |
-| `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |
+| `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — `count` is the number of items on this page, `maxCount` the total matching the search/filters (ignoring only the pagination limit), so the frontend paginator sizes itself to the filtered result set. Items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |
 | `singleResponse($data, $groups)` | `200 { message, data }` — same `ArraySerializable`-aware serialization as `listResponse` |
 
 **Input handling:**

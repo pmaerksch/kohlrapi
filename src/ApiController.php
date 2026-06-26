@@ -340,7 +340,11 @@ class ApiController extends AbstractController
 			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
 		}
 
-		return $this->listResponse($result[ 'items' ], $serializerGroups, $result[ 'count' ], $repository->totalCount());
+		// `count` is the number of items in this page; `maxCount` is the total number of
+		// results matching the search term/filters (ignoring only the pagination limit).
+		// The frontend paginator needs the filtered total, NOT the unfiltered grand total —
+		// otherwise it renders pages for records the current search doesn't return.
+		return $this->listResponse($result[ 'items' ], $serializerGroups, count($result[ 'items' ]), $result[ 'count' ]);
 	}
 
 
