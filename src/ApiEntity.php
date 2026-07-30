@@ -7,6 +7,7 @@
  *   - Auto-generated integer ID (internal, never exposed)
  *   - UUID v4 generated on construction (exposed via 'uuid' serializer group)
  *   - updateFromEntity() — copies all properties except UUID from another instance
+ *   - parseJson() — wraps an incoming client payload in a JsonHelper for use in updateFromJson()
  */
 
 namespace pmaerksch\Kohlrapi;
@@ -80,5 +81,19 @@ class ApiEntity
 	{
 		$this->uuid = $uuid;
 		return $this;
+	}
+
+
+
+	/**
+	 * Wraps a client payload (JSON string or already-decoded array) for use in
+	 * updateFromJson() implementations, via {@see JsonHelper::require()} and
+	 * {@see JsonHelper::optional()}.
+	 *
+	 * @throws \Exception if $json is not valid JSON / not an array
+	 */
+	protected function parseJson(mixed $json): JsonHelper
+	{
+		return new JsonHelper($json);
 	}
 }
