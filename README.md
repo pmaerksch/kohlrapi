@@ -7,7 +7,7 @@ useful bits from each project and tried to make them reusable for other projects
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
 
 **Author:** Philip Märksch  
-**Version:** 1.11.1  
+**Version:** 1.12.0  
 **License:** MIT
 
 ---
@@ -58,6 +58,35 @@ Abstract base entity. Extend this in all your Doctrine entities.
 - Auto-generated integer `id` (internal, never exposed)
 - UUID v4 generated on construction (exposed via the `uuid` serializer group)
 - `updateFromEntity()` — copies all properties except `uuid` from another instance of the same class
+- `parseJson($json)` — wraps a client payload (JSON string or already-decoded array) in a [`JsonHelper`](#jsonhelper) for use in `updateFromJson()` implementations
+
+---
+
+### `JsonHelper`
+
+Utility for reading required/optional keys out of a client payload, typically used from an entity's `updateFromJson()` via [`ApiEntity::parseJson()`](#apientity).
+
+```php
+class Booking extends ApiEntity
+{
+    public function updateFromJson(mixed $json): static
+    {
+        $data = $this->parseJson($json);
+
+        $this->name  = $data->require('name');           // throws if missing/empty
+        $this->notes = $data->optional('notes', '');      // falls back to default if absent
+
+        return $this;
+    }
+}
+```
+
+| Method | Description |
+|---|---|
+| `require($key, $allowEmpty = false)` | Returns `$data[$key]`; throws if the key is missing, or (unless `$allowEmpty`) if its value is `null`, an empty string, or an empty array |
+| `optional($key, $default = null)` | Returns `$data[$key]` if present, otherwise `$default` |
+
+The constructor and `format()` throw if the input isn't a JSON string decodable to an array, or isn't already an array.
 
 ---
 
