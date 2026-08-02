@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="assets/logo.webp" alt="kohlrAPI logo" width="180">
+</p>
+
 # kohlrAPI
 
-This is a lightweight Symfony library that helps to build a RESTful API. The name is a play on words and stems from one of the several projects this 
-was developed for/with: [AdCaptain](https://adcaptain.de). I finally decided to create a standalone package combining the many 
-useful bits from each project and tried to make them reusable for other projects.
+This is a lightweight Symfony library that helps to build a RESTful API. It was developed initially for: [AdCaptain](https://adcaptain.de) and later reused and improved
+in other private projects of mine. I finally decided to create a standalone package combining the many useful bits from each project and tried to make 
+them reusable for other projects and other people.
 
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
 
