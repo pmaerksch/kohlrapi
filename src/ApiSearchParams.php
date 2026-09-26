@@ -18,11 +18,16 @@ readonly class ApiSearchParams
 
 
 	/**
-	 * @throws JsonException
+	 * @throws JsonException If the body is not valid JSON, or valid JSON that isn't an object (e.g. `null`, `5`).
 	 */
 	public static function fromRequest(Request $request): self
 	{
 		$data = json_decode($request->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+		if ( !is_array($data) )
+		{
+			throw new JsonException('Expected a JSON object as search payload');
+		}
 
 		return self::fromArray($data);
 	}
@@ -31,14 +36,20 @@ readonly class ApiSearchParams
 
 	public static function fromArray(array $data): self
 	{
-		$limit = (int)($data['limit'] ?? 25);
+		// Client input: coerce every field to its declared type rather than letting a
+		// malformed payload (e.g. "filters": "abc") surface later as a TypeError / 500.
+		$limit   = is_numeric($data['limit'] ?? null) ? (int)$data['limit'] : 25;
+		$offset  = is_numeric($data['offset'] ?? null) ? (int)$data['offset'] : 0;
+		$term    = $data['term'] ?? '';
+		$filters = $data['filters'] ?? [];
+		$sort    = $data['sort'] ?? null;
 
 		return new self(
-			offset:  max(0, (int)($data['offset'] ?? 0)),
+			offset:  max(0, $offset),
 			limit:   ($limit > 0 && $limit <= 500) ? $limit : 25,
-			term:    (string)($data['term'] ?? ''),
-			filters: $data['filters'] ?? [],
-			sort:    $data['sort'] ?? null,
+			term:    is_scalar($term) ? (string)$term : '',
+			filters: is_array($filters) ? $filters : [],
+			sort:    is_array($sort) ? $sort : null,
 		);
 	}
 

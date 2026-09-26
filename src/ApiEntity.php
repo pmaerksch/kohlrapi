@@ -48,11 +48,16 @@ class ApiEntity
 
 
 
+	/**
+	 * Copies all properties of $updated onto this instance, except the identifiers
+	 * (id, uuid) — overwriting the id of a managed entity would corrupt Doctrine's
+	 * identity map (a freshly deserialized $updated has id === null).
+	 */
 	public function updateFromEntity(ApiEntity $updated): static
 	{
 		foreach ( get_object_vars($updated) as $key => $value )
 		{
-			if ( $key !== 'uuid' )
+			if ( $key !== 'id' && $key !== 'uuid' )
 			{
 				$this->$key = $value;
 			}
@@ -90,7 +95,7 @@ class ApiEntity
 	 * updateFromJson() implementations, via {@see JsonHelper::require()} and
 	 * {@see JsonHelper::optional()}.
 	 *
-	 * @throws \Exception if $json is not valid JSON / not an array
+	 * @throws \InvalidArgumentException if $json is not valid JSON / not an array
 	 */
 	protected function parseJson(mixed $json): JsonHelper
 	{

@@ -2,7 +2,7 @@
 
 namespace pmaerksch\Kohlrapi;
 
-use Exception;
+use InvalidArgumentException;
 
 /**
  * Utility class for handling JSON data, providing methods for formatting,
@@ -16,7 +16,7 @@ class JsonHelper
 
 
 	/**
-	 * @throws Exception
+	 * @throws InvalidArgumentException
 	 */
 	public function __construct(mixed $json = null)
 	{
@@ -35,15 +35,15 @@ class JsonHelper
 	 * Throws an exception if the input cannot be decoded into an array.
 	 * @param mixed $json The JSON string or an array to format. If a string is provided, it will be decoded into an array.
 	 * @return static The current instance with the internal data property updated.
-	 * @throws Exception If the input is not a valid JSON string or cannot be converted into an array.
+	 * @throws InvalidArgumentException If the input is not a valid JSON string or cannot be converted into an array.
 	 */
-	function format(mixed $json): static
+	public function format(mixed $json): static
 	{
 		$data = is_string($json) ? json_decode($json, true) : $json;
 
 		if ( !is_array($data) )
 		{
-			throw new Exception('Invalid JSON Format', 1);
+			throw new InvalidArgumentException('Invalid JSON Format', 1);
 		}
 
 		$this->data = $data;
@@ -59,34 +59,26 @@ class JsonHelper
 	 * @param string $key The key to retrieve from the data array.
 	 * @param bool $allowEmpty Whether to allow empty values for the specified key. Defaults to false.
 	 * @return mixed The value associated with the specified key.
-	 * @throws Exception If the key does not exist or if its value is empty and empty values are not allowed.
+	 * @throws ApiMissingFieldException If the key does not exist or if its value is empty and empty values are not allowed.
+	 *                                  Being an ApiMissingFieldException, it can be turned into a 422 via
+	 *                                  {@see ApiController::missingFieldResponse()}.
 	 */
-	function require(string $key, bool $allowEmpty = false): mixed
+	public function require(string $key, bool $allowEmpty = false): mixed
 	{
 		if ( !array_key_exists($key, $this->data) )
 		{
-			throw new Exception('Missing required key in JSON: ' . $key, 2);
+			throw new ApiMissingFieldException($key);
 		}
 
-		if ( $allowEmpty === false )
+		$value = $this->data[ $key ];
+
+		// Note: a strict check, not empty() — empty("0") is true, but "0" is a valid value.
+		if ( !$allowEmpty && ($value === null || $value === '' || $value === []) )
 		{
-			$value = $this->data[ $key ];
-
-			if ( is_string($value) && empty($value))
-			{
-				throw new Exception('Empty String value for required key in JSON: ' . $key, 3);
-			}
-			else if ( is_array($value) && empty($value) === true )
-			{
-				throw new Exception('Empty Array value for required key in JSON: ' . $key, 3);
-			}
-			else if ( is_null($value) )
-			{
-				throw new Exception('Null value for required key in JSON: ' . $key, 3);
-			}
+			throw new ApiMissingFieldException($key);
 		}
 
-		return $this->data[ $key ];
+		return $value;
 	}
 
 
@@ -98,7 +90,7 @@ class JsonHelper
 	 * @param mixed $default The default value to return if the key does not exist in the data array.
 	 * @return mixed The value associated with the key, or the default value if the key is not found.
 	 */
-	function optional(string $key, mixed $default = null): mixed
+	public function optional(string $key, mixed $default = null): mixed
 	{
 		return array_key_exists($key, $this->data) ? $this->data[ $key ] : $default;
 	}

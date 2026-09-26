@@ -11,7 +11,7 @@ them reusable for other projects and other people.
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
 
 **Author:** Philip Märksch  
-**Version:** 1.12.0  
+**Version:** 1.13.0  
 **License:** MIT
 
 ---
@@ -21,6 +21,7 @@ It features a set of abstract base classes for Symfony API backends, providing g
 - PHP >= 8.2
 - Symfony 7.4 or 8.0
 - Doctrine ORM >= 3.6
+- Symfony SecurityBundle (for `getUser()` / `isGranted()` in `ApiController`)
 
 ---
 
@@ -61,7 +62,7 @@ Abstract base entity. Extend this in all your Doctrine entities.
 
 - Auto-generated integer `id` (internal, never exposed)
 - UUID v4 generated on construction (exposed via the `uuid` serializer group)
-- `updateFromEntity()` — copies all properties except `uuid` from another instance of the same class
+- `updateFromEntity()` — copies all properties except the identifiers (`id`, `uuid`) from another instance of the same class
 - `parseJson($json)` — wraps a client payload (JSON string or already-decoded array) in a [`JsonHelper`](#jsonhelper) for use in `updateFromJson()` implementations
 
 ---
@@ -87,10 +88,12 @@ class Booking extends ApiEntity
 
 | Method | Description |
 |---|---|
-| `require($key, $allowEmpty = false)` | Returns `$data[$key]`; throws if the key is missing, or (unless `$allowEmpty`) if its value is `null`, an empty string, or an empty array |
+| `require($key, $allowEmpty = false)` | Returns `$data[$key]`; throws [`ApiMissingFieldException`](#apimissingfieldexception) if the key is missing, or (unless `$allowEmpty`) if its value is `null`, `''`, or `[]`. Falsy values like `"0"`, `0` and `false` are accepted. |
 | `optional($key, $default = null)` | Returns `$data[$key]` if present, otherwise `$default` |
 
-The constructor and `format()` throw if the input isn't a JSON string decodable to an array, or isn't already an array.
+The constructor and `format()` throw an `InvalidArgumentException` if the input isn't a JSON string decodable to an array, or isn't already an array.
+
+Because `require()` throws `ApiMissingFieldException`, a controller can turn it into a `422` with [`missingFieldResponse()`](#apicontroller).
 
 ---
 
@@ -175,6 +178,8 @@ Subclasses **may** override:
 
 Supported `matchMode` values: `contains`, `notContains`, `startsWith`, `endsWith`, `equals`, `notEquals`, `lt`, `lte`, `gt`, `gte`, `in`
 
+`in` expects a non-empty array of scalars; every other mode expects a single scalar. Constraints with a value of the wrong shape are ignored. `%` and `_` in the LIKE-based modes are matched literally, not as wildcards.
+
 #### Sort payload
 
 ```json
@@ -197,6 +202,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `successResponse($data)` | `200 { message, ...data }` |
 | `createdResponse($data)` | `201 { message, ...data }` |
 | `noContentResponse()` | `204` |
+| `accessDeniedResponse()` | `401` for anonymous users, `403` for authenticated ones |
 | `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — `count` is the number of items on this page, `maxCount` the total matching the search/filters (ignoring only the pagination limit), so the frontend paginator sizes itself to the filtered result set. Items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |
 | `singleResponse($data, $groups)` | `200 { message, data }` — same `ArraySerializable`-aware serialization as `listResponse` |
 
@@ -204,7 +210,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 
 | Method | Description |
 |---|---|
-| `deserializeInput($class, $request)` | Deserializes request JSON into a DTO; returns `400` on bad JSON |
+| `deserializeInput($class, $request)` | Deserializes request JSON into a DTO. On bad JSON it returns a `400` `JsonResponse` **instead of** the DTO — check `instanceof JsonResponse` before using the result |
 | `validateInput($input)` | Validates a DTO via Symfony Validator; returns `422` with per-field violations or `null` if valid |
 | `requireField($data, $key, $filter)` | Extracts a field from decoded JSON; throws `ApiMissingFieldException` if absent or invalid |
 | `missingFieldResponse($e)` | Converts an `ApiMissingFieldException` into a `422` response |
@@ -216,12 +222,12 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `handleFetch($classname, $uuid, $authLevel, $groups)` | Fetch a single entity by UUID with auth check |
 | `handleCreate($classname, $request, $authLevel)` | Deserialize + persist a new entity |
 | `handleUpdate($classname, $request, $authLevel)` | Deserialize + update an existing entity by UUID |
-| `handleBulk($classname, $request, $authLevel)` | Create or update multiple entities in one transaction; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. |
-| `handleBulkDelete($classname, $request, $authLevel)` | Delete multiple entities by UUID in one transaction. Expects a JSON array of UUID strings. Returns `204`. |
+| `handleBulk($classname, $request, $authLevel)` | Create or update multiple entities in one transaction; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). |
+| `handleBulkDelete($classname, $request, $authLevel)` | Delete multiple entities by UUID in one transaction. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request and again per entity (`delete` with the entity as subject). |
 | `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON. |
 | `getEntity($classname, $uuid, $authLevel)` | Fetch a single entity object (no serialization) |
 | `getEntityList($repository, $searchParams, $authLevel)` | Fetch a list of entity objects (no serialization) |
-| `getRandomEntityList($repository, $searchParams, $authLevel)` | Fetch a random list of entity objects (no serialization) |
+| `getRandomEntityList($repository, $searchParams, $authLevel)` | Fetch a random list of entity objects (no serialization). Portable across databases: the matching ids are sampled in PHP, so no custom `RAND()` DQL function is needed. |
 
 **Utility:**
 
@@ -334,7 +340,29 @@ $params = ApiSearchParams::fromInternal(limit: 10, filters: ['status' => ...]);
 
 ### `ApiMissingFieldException`
 
-Thrown by `requireField()` when a required field is absent or fails the provided filter callable. Carries the field name and produces the message `"Missing or invalid field: {field}"`.
+Thrown by `requireField()` and `JsonHelper::require()` when a required field is absent or fails the provided filter callable. Carries the field name and produces the message `"Missing or invalid field: {field}"`.
+
+---
+
+## Changelog
+
+### 1.13.0
+
+**Fixes**
+
+- `ApiEntity::updateFromEntity()` no longer copies `id` onto the target entity (previously it could null the id of a managed entity and corrupt Doctrine's identity map).
+- `JsonHelper::require()` accepts falsy-but-present values such as `"0"`; only `null`, `''` and `[]` count as empty.
+- `ApiRepository::searchRandom()` no longer relies on a non-standard `RAND()` DQL function and works on every database Doctrine supports. It now also honours `getMaxLimit()`.
+- LIKE-based filters (`contains`, `notContains`, `startsWith`, `endsWith`) match `%` and `_` literally instead of as wildcards.
+- Malformed search payloads (non-object bodies, filters/sorts of the wrong shape) return `400` or are ignored instead of causing a `500`.
+- `handleBulk()` / `handleBulkDelete()` run authorization per item with the entity as subject, so resource-level rules in `isAuthorized()` also apply to bulk writes. Malformed bulk bodies return `400`, and the transaction is always rolled back on failure.
+- Added the missing `symfony/security-bundle` dependency.
+
+**Changes**
+
+- `JsonHelper::require()` throws `ApiMissingFieldException` (convertible to a `422` via `missingFieldResponse()`), and invalid input throws `InvalidArgumentException`, both instead of a plain `\Exception` with codes 1–3. Code catching `\Exception` is unaffected.
+- New `accessDeniedResponse()` helper (`401` for anonymous users, `403` otherwise).
+- The `$distinct` parameter of `searchRandom()` is deprecated and has no effect; results are always distinct.
 
 ---
 

@@ -192,11 +192,31 @@ class ApiController extends AbstractController
 
 
 	/**
+	 * Returns 401 for anonymous users and 403 for authenticated ones.
+	 */
+	protected function accessDeniedResponse(): JsonResponse
+	{
+		$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
+
+		return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+	}
+
+
+
+	/**
 	 * Deserializes the JSON request body into an object of the specified class.
 	 * Validates the request body and handles errors for missing or invalid JSON data.
-	 * @param string $class The fully-qualified class name to deserialize the JSON data into.
+	 *
+	 * On failure this returns a ready-made 400 JsonResponse instead of the object, so
+	 * callers must check for it before using the result:
+	 *
+	 *     $input = $this->deserializeInput(MyDto::class, $request);
+	 *     if ( $input instanceof JsonResponse ) { return $input; }
+	 *
+	 * @template T of object
+	 * @param class-string<T> $class The fully-qualified class name to deserialize the JSON data into.
 	 * @param Request $request The HTTP request containing the JSON body to be deserialized.
-	 * @return object The deserialized object or an error response in case of failure.
+	 * @return T|JsonResponse The deserialized object, or a 400 error response in case of failure.
 	 */
 	protected function deserializeInput(string $class, Request $request): object
 	{
@@ -336,8 +356,7 @@ class ApiController extends AbstractController
 		}
 		catch ( AccessDeniedException )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		// `count` is the number of items in this page; `maxCount` is the total number of
@@ -365,8 +384,7 @@ class ApiController extends AbstractController
 		}
 		catch ( AccessDeniedException )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		if ( is_null($entity) )
@@ -393,8 +411,7 @@ class ApiController extends AbstractController
 	{
 		if ( !$this->can($authLevel, null, $classname, 'create') )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		if ( trim($request->getContent()) === '' )
@@ -435,8 +452,7 @@ class ApiController extends AbstractController
 
 		if ( !$this->can($authLevel, $entity, $classname, 'update') )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		if ( trim($request->getContent()) === '' )
@@ -474,20 +490,31 @@ class ApiController extends AbstractController
 	 * Handles bulk create/update for an array of entity payloads in a single transaction.
 	 * Items with a uuid are updated; items without are created.
 	 * Returns the uuids of all items in the same order as the input.
+	 *
+	 * Authorization runs once for the whole request (operation 'bulk'), then once per item
+	 * exactly like the single-item handlers ('update' with the loaded entity as subject,
+	 * 'create' without) — so resource-level rules in isAuthorized() also apply to bulk writes.
 	 */
 	public function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
 		if ( !$this->can($authLevel, null, $classname, 'bulk') )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		$items = json_decode($request->getContent(), true);
 
-		if ( !is_array($items) )
+		if ( !is_array($items) || !array_is_list($items) )
 		{
 			return $this->errorResponse('Expected a JSON array', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
+		}
+
+		foreach ( $items as $data )
+		{
+			if ( !is_array($data) || (isset($data[ 'uuid' ]) && !is_string($data[ 'uuid' ])) )
+			{
+				return $this->errorResponse('Expected an array of JSON objects', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
+			}
 		}
 
 		$uuids = [];
@@ -510,6 +537,12 @@ class ApiController extends AbstractController
 						return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
 					}
 
+					if ( !$this->can($authLevel, $entity, $classname, 'update') )
+					{
+						$this->em->rollback();
+						return $this->accessDeniedResponse();
+					}
+
 					$this->serializer->deserialize(json_encode($data), $classname, 'json', [
 						AbstractNormalizer::OBJECT_TO_POPULATE => $entity,
 						'ignored_attributes'                   => ['uuid'],
@@ -519,6 +552,12 @@ class ApiController extends AbstractController
 				}
 				else
 				{
+					if ( !$this->can($authLevel, null, $classname, 'create') )
+					{
+						$this->em->rollback();
+						return $this->accessDeniedResponse();
+					}
+
 					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', [
 						'ignored_attributes' => ['uuid'],
 					]);
@@ -531,9 +570,13 @@ class ApiController extends AbstractController
 			$this->em->flush();
 			$this->em->commit();
 		}
-		catch ( Exception $e )
+		catch ( Throwable $e )
 		{
-			$this->em->rollback();
+			if ( $this->em->getConnection()->isTransactionActive() )
+			{
+				$this->em->rollback();
+			}
+
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to save data!';
 			return $this->errorResponse($message, Response::HTTP_INTERNAL_SERVER_ERROR, $e, 'api.errors.saveFailed');
 		}
@@ -545,18 +588,20 @@ class ApiController extends AbstractController
 
 	/**
 	 * Handles bulk deletion of entities by UUID in a single transaction.
+	 *
+	 * Authorization runs once for the whole request, then once per entity with the
+	 * loaded entity as subject — so resource-level rules in isAuthorized() also apply.
 	 */
 	public function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): Response
 	{
 		if ( !$this->can($authLevel, null, $classname, 'delete') )
 		{
-			$status = $this->getUser() === null ? Response::HTTP_UNAUTHORIZED : Response::HTTP_FORBIDDEN;
-			return $this->errorResponse('Access denied!', $status, null, 'api.errors.accessDenied');
+			return $this->accessDeniedResponse();
 		}
 
 		$uuids = json_decode($request->getContent(), true);
 
-		if ( !is_array($uuids) )
+		if ( !is_array($uuids) || !array_is_list($uuids) || count(array_filter($uuids, 'is_string')) !== count($uuids) )
 		{
 			return $this->errorResponse('Expected a JSON array of UUIDs', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
 		}
@@ -575,15 +620,25 @@ class ApiController extends AbstractController
 					return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
 				}
 
+				if ( !$this->can($authLevel, $entity, $classname, 'delete') )
+				{
+					$this->em->rollback();
+					return $this->accessDeniedResponse();
+				}
+
 				$this->em->remove($entity);
 			}
 
 			$this->em->flush();
 			$this->em->commit();
 		}
-		catch ( Exception $e )
+		catch ( Throwable $e )
 		{
-			$this->em->rollback();
+			if ( $this->em->getConnection()->isTransactionActive() )
+			{
+				$this->em->rollback();
+			}
+
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to delete data!';
 			return $this->errorResponse($message, Response::HTTP_INTERNAL_SERVER_ERROR, $e, 'api.errors.deleteFailed');
 		}

@@ -156,31 +156,59 @@ abstract class ApiRepository extends ServiceEntityRepository
 
 	/**
 	 * Returns a random subset of results matching the given term and filters.
+	 *
+	 * DQL has no portable RAND(), so the matching ids are fetched (cheap: a single
+	 * integer column), sampled in PHP, and the chosen entities loaded with one IN query.
+	 * Works on every database Doctrine supports, without a custom DQL function.
+	 *
 	 * @param string $term Global search term.
 	 * @param array $filters Filter payload (same format as search()).
 	 * @param int $limit Maximum number of results to return.
-	 * @param bool $distinct Whether to apply DISTINCT to the query.
+	 * @param bool $distinct Deprecated, no effect: results are always distinct entities.
 	 * @return array { items, count }
 	 */
 	public function searchRandom(string $term, array $filters, int $limit, bool $distinct = false): array
 	{
+		$maxLimit = $this->getMaxLimit();
+		if ( $maxLimit !== null )
+		{
+			$limit = min($limit, $maxLimit);
+		}
+
+		if ( $limit <= 0 )
+		{
+			return ['items' => [], 'count' => 0];
+		}
+
 		$alias = $this->getAlias();
 		$qb    = $this->createQueryBuilder($alias);
-
-		if ( $distinct )
-		{
-			$qb->distinct();
-		}
 
 		$this->applyBaseConditions($qb);
 		$this->applyGlobalSearch($qb, $term);
 		$this->applyFilters($qb, $filters);
-		$qb->orderBy('RAND()');
 
-		$items = $qb
-			->setMaxResults($limit)
+		$ids = $qb
+			->select("DISTINCT {$alias}.id")
+			->resetDQLPart('orderBy')
+			->getQuery()
+			->getSingleColumnResult();
+
+		if ( count($ids) === 0 )
+		{
+			return ['items' => [], 'count' => 0];
+		}
+
+		shuffle($ids);
+		$ids = array_slice($ids, 0, $limit);
+
+		$items = $this->createQueryBuilder($alias)
+			->where("{$alias}.id IN (:ids)")
+			->setParameter('ids', $ids)
 			->getQuery()
 			->getResult();
+
+		// The IN query returns rows in database order — restore the random order.
+		shuffle($items);
 
 		return ['items' => $items, 'count' => count($items)];
 	}
@@ -221,7 +249,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 
 		$defaultColumn = $map[$default['field']] ?? "{$alias}.id";
 
-		if ( !$sort || empty($sort['field']) )
+		if ( !$sort || empty($sort['field']) || !is_string($sort['field']) )
 		{
 			$qb->orderBy($defaultColumn, $default['order']);
 			return;
@@ -239,7 +267,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 			return;
 		}
 
-		$order = strtoupper($sort['order'] ?? 'ASC') === 'DESC' ? 'DESC' : 'ASC';
+		$order = is_string($sort['order'] ?? null) && strtoupper($sort['order']) === 'DESC' ? 'DESC' : 'ASC';
 		$qb->orderBy($map[$sort['field']], $order);
 	}
 
@@ -268,22 +296,43 @@ abstract class ApiRepository extends ServiceEntityRepository
 
 		foreach ( $filters as $key => $filterConfig )
 		{
-			if ( !isset($map[$key]) )
+			if ( !isset($map[$key]) || !is_array($filterConfig) )
 			{
 				continue;
 			}
 
 			$column      = $map[$key];
 			$constraints = $filterConfig['constraints'] ?? [];
-			$useOr       = strtolower($filterConfig['operator'] ?? 'and') === 'or';
+			$operator    = $filterConfig['operator'] ?? 'and';
+			$useOr       = is_string($operator) && strtolower($operator) === 'or';
 			$expressions = [];
+
+			if ( !is_array($constraints) )
+			{
+				continue;
+			}
 
 			foreach ( $constraints as $constraint )
 			{
+				if ( !is_array($constraint) )
+				{
+					continue;
+				}
+
 				$value     = $constraint['value'] ?? null;
 				$matchMode = $constraint['matchMode'] ?? 'contains';
 
 				if ( $value === null || $value === '' )
+				{
+					continue;
+				}
+
+				// Only 'in' takes a list; every other mode compares against a single scalar.
+				$isValid = $matchMode === 'in'
+					? is_array($value) && count($value) > 0 && count(array_filter($value, 'is_scalar')) === count($value)
+					: is_scalar($value);
+
+				if ( !$isValid )
 				{
 					continue;
 				}
@@ -293,18 +342,18 @@ abstract class ApiRepository extends ServiceEntityRepository
 				switch ( $matchMode )
 				{
 					case 'startsWith':
-						$expressions[] = $qb->expr()->like($column, ":$param");
-						$qb->setParameter($param, $value . '%');
+						$expressions[] = $this->likeExpression($column, $param);
+						$qb->setParameter($param, $this->escapeLike($value) . '%');
 						break;
 
 					case 'endsWith':
-						$expressions[] = $qb->expr()->like($column, ":$param");
-						$qb->setParameter($param, '%' . $value);
+						$expressions[] = $this->likeExpression($column, $param);
+						$qb->setParameter($param, '%' . $this->escapeLike($value));
 						break;
 
 					case 'notContains':
-						$expressions[] = $qb->expr()->notLike($column, ":$param");
-						$qb->setParameter($param, '%' . $value . '%');
+						$expressions[] = $this->likeExpression($column, $param, true);
+						$qb->setParameter($param, '%' . $this->escapeLike($value) . '%');
 						break;
 
 					case 'equals':
@@ -338,17 +387,14 @@ abstract class ApiRepository extends ServiceEntityRepository
 						break;
 
 					case 'in':
-						if ( is_array($value) && count($value) > 0 )
-						{
-							$expressions[] = $qb->expr()->in($column, ":$param");
-							$qb->setParameter($param, $value);
-						}
+						$expressions[] = $qb->expr()->in($column, ":$param");
+						$qb->setParameter($param, array_values($value));
 						break;
 
 					case 'contains':
 					default:
-						$expressions[] = $qb->expr()->like($column, ":$param");
-						$qb->setParameter($param, '%' . $value . '%');
+						$expressions[] = $this->likeExpression($column, $param);
+						$qb->setParameter($param, '%' . $this->escapeLike($value) . '%');
 						break;
 				}
 			}
@@ -371,5 +417,38 @@ abstract class ApiRepository extends ServiceEntityRepository
 				$qb->andWhere($qb->expr()->andX(...$expressions));
 			}
 		}
+	}
+
+
+
+	/**
+	 * Escape character used in LIKE patterns. Not a backslash, because backslashes
+	 * inside SQL string literals are treated differently across databases (MySQL vs. others).
+	 */
+	private const LIKE_ESCAPE = '!';
+
+
+
+	/**
+	 * Builds a `column [NOT] LIKE :param ESCAPE '!'` DQL expression.
+	 */
+	private function likeExpression(string $column, string $param, bool $negate = false): string
+	{
+		$not = $negate ? 'NOT ' : '';
+
+		return "{$column} {$not}LIKE :{$param} ESCAPE '" . self::LIKE_ESCAPE . "'";
+	}
+
+
+
+	/**
+	 * Escapes LIKE wildcards in user input, so a search for "50%" or "a_b" matches
+	 * those characters literally instead of treating them as wildcards.
+	 */
+	private function escapeLike(string|int|float|bool $value): string
+	{
+		$e = self::LIKE_ESCAPE;
+
+		return str_replace([$e, '%', '_'], [$e . $e, $e . '%', $e . '_'], (string)$value);
 	}
 }
