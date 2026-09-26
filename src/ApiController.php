@@ -245,21 +245,30 @@ class ApiController extends AbstractController
 	 */
 	protected function validateInput(object $input): ?JsonResponse
 	{
-		$violations = $this->validator->validate($input);
+		$violations = $this->collectViolations($input);
 
-		if ( count($violations) === 0 )
-		{
-			return null;
-		}
+		return count($violations) === 0 ? null : $this->validationErrorResponse($violations);
+	}
 
+
+
+	/**
+	 * Validates an object via Symfony's Validator and returns its violations as a
+	 * flat { "field": "message" } map (empty when valid).
+	 * @param object $input The DTO or entity to validate.
+	 * @param string $prefix Prepended to every field path, e.g. "3." to address item 3 of a bulk payload.
+	 */
+	protected function collectViolations(object $input, string $prefix = ''): array
+	{
 		$errors = [];
-		foreach ( $violations as $violation )
+
+		foreach ( $this->validator->validate($input) as $violation )
 		{
-			$field            = ltrim($violation->getPropertyPath(), '.');
-			$errors[ $field ] = $violation->getMessage();
+			$field                      = ltrim($violation->getPropertyPath(), '.');
+			$errors[ $prefix . $field ] = $violation->getMessage();
 		}
 
-		return $this->validationErrorResponse($errors);
+		return $errors;
 	}
 
 
@@ -399,13 +408,12 @@ class ApiController extends AbstractController
 
 	/**
 	 * Handles the creation of an entity by deserializing the request data and saving it to the database.
-	 * Checks the user's authorization level and validates the request body before processing.
+	 * Checks the user's authorization level, then validates the entity (Symfony Validator constraints
+	 * on the entity class) before persisting it.
 	 * @param string $classname Fully qualified class name of the entity to be created.
 	 * @param Request $request HTTP request containing the serialized entity data in JSON format.
 	 * @param string $authLevel Required authorization level to perform the operation. Defaults to 'ROLE_ADMIN'.
-	 * @return JsonResponse JSON response indicating the result of the operation.
-	 *                       Returns an error response if the authorization fails, the request body is invalid,
-	 *                       or there is an error during the persistence process.
+	 * @return JsonResponse 201 { uuid } on success; 401/403, 400 (empty body), 422 (validation failed) or 500 otherwise.
 	 */
 	public function handleCreate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
@@ -421,7 +429,14 @@ class ApiController extends AbstractController
 
 		try
 		{
-			$entity = $this->serializer->deserialize($request->getContent(), $classname, 'json', ['ignored_attributes' => ['uuid']]);
+			$entity     = $this->serializer->deserialize($request->getContent(), $classname, 'json', ['ignored_attributes' => ['uuid']]);
+			$violations = $this->collectViolations($entity);
+
+			if ( count($violations) > 0 )
+			{
+				return $this->validationErrorResponse($violations);
+			}
+
 			$this->em->persist($entity);
 			$this->em->flush();
 		}
@@ -439,10 +454,11 @@ class ApiController extends AbstractController
 
 	/**
 	 * Updates an existing entity with data provided in the request.
+	 * The entity is validated after the payload has been applied; if it is invalid, the in-memory
+	 * changes are discarded (so a later flush in the same request can't persist them) and 422 is returned.
 	 * @param string $classname The class name of the entity to update.
 	 * @param Request $request The HTTP request containing the update data.
-	 * @return JsonResponse JSON response indicating success, an error message if the entity is not found, or if the request data is invalid.
-	 * @throws Exception|ExceptionInterface Thrown if an error occurs during the deserialization or persistence process.
+	 * @return JsonResponse 200 on success; 401/403, 400 (empty body), 404, 422 (validation failed) or 500 otherwise.
 	 */
 	public function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
@@ -472,10 +488,19 @@ class ApiController extends AbstractController
 				'ignored_attributes'                   => ['uuid']
 			]);
 
+			$violations = $this->collectViolations($entity);
+
+			if ( count($violations) > 0 )
+			{
+				$this->discardChanges([$entity]);
+				return $this->validationErrorResponse($violations);
+			}
+
 			$this->em->flush();
 		}
 		catch ( Exception $e )
 		{
+			$this->discardChanges([$entity]);
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to save data!';
 
 			return $this->errorResponse($message, Response::HTTP_INTERNAL_SERVER_ERROR, $e, 'api.errors.saveFailed');
@@ -487,15 +512,20 @@ class ApiController extends AbstractController
 
 
 	/**
-	 * Handles bulk create/update for an array of entity payloads in a single transaction.
+	 * Handles bulk create/update for an array of entity payloads, all-or-nothing.
 	 * Items with a uuid are updated; items without are created.
 	 * Returns the uuids of all items in the same order as the input.
 	 *
 	 * Authorization runs once for the whole request (operation 'bulk'), then once per item
 	 * exactly like the single-item handlers ('update' with the loaded entity as subject,
 	 * 'create' without) — so resource-level rules in isAuthorized() also apply to bulk writes.
+	 *
+	 * Every item is validated; violations are reported for all items at once, keyed by
+	 * "<index>.<field>" (e.g. "2.name"). Nothing is written unless every item passes.
+	 *
+	 * @param int|null $maxItems Maximum number of items per request (413 if exceeded); null for no limit.
 	 */
-	public function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
+	public function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): JsonResponse
 	{
 		if ( !$this->can($authLevel, null, $classname, 'bulk') )
 		{
@@ -509,6 +539,11 @@ class ApiController extends AbstractController
 			return $this->errorResponse('Expected a JSON array', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
 		}
 
+		if ( $maxItems !== null && count($items) > $maxItems )
+		{
+			return $this->tooManyItemsResponse($maxItems);
+		}
+
 		foreach ( $items as $data )
 		{
 			if ( !is_array($data) || (isset($data[ 'uuid' ]) && !is_string($data[ 'uuid' ])) )
@@ -517,13 +552,14 @@ class ApiController extends AbstractController
 			}
 		}
 
-		$uuids = [];
+		$uuids      = [];
+		$updated    = []; // managed entities, modified in place
+		$created    = []; // new entities, persisted only once every item has passed
+		$violations = [];
 
 		try
 		{
-			$this->em->beginTransaction();
-
-			foreach ( $items as $data )
+			foreach ( $items as $index => $data )
 			{
 				$uuid = $data[ 'uuid' ] ?? null;
 
@@ -533,28 +569,28 @@ class ApiController extends AbstractController
 
 					if ( $entity === null )
 					{
-						$this->em->rollback();
+						$this->discardChanges($updated);
 						return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
 					}
 
 					if ( !$this->can($authLevel, $entity, $classname, 'update') )
 					{
-						$this->em->rollback();
+						$this->discardChanges($updated);
 						return $this->accessDeniedResponse();
 					}
+
+					$updated[] = $entity;
 
 					$this->serializer->deserialize(json_encode($data), $classname, 'json', [
 						AbstractNormalizer::OBJECT_TO_POPULATE => $entity,
 						'ignored_attributes'                   => ['uuid'],
 					]);
-
-					$uuids[] = $uuid;
 				}
 				else
 				{
 					if ( !$this->can($authLevel, null, $classname, 'create') )
 					{
-						$this->em->rollback();
+						$this->discardChanges($updated);
 						return $this->accessDeniedResponse();
 					}
 
@@ -562,22 +598,32 @@ class ApiController extends AbstractController
 						'ignored_attributes' => ['uuid'],
 					]);
 
-					$this->em->persist($entity);
-					$uuids[] = $entity->getUuid();
+					$created[] = $entity;
 				}
+
+				$uuids[]    = $entity->getUuid();
+				$violations = array_merge($violations, $this->collectViolations($entity, "$index."));
 			}
 
+			if ( count($violations) > 0 )
+			{
+				$this->discardChanges($updated);
+				return $this->validationErrorResponse($violations);
+			}
+
+			foreach ( $created as $entity )
+			{
+				$this->em->persist($entity);
+			}
+
+			// flush() writes all inserts and updates in a single transaction.
 			$this->em->flush();
-			$this->em->commit();
 		}
 		catch ( Throwable $e )
 		{
-			if ( $this->em->getConnection()->isTransactionActive() )
-			{
-				$this->em->rollback();
-			}
-
+			$this->discardChanges($updated);
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to save data!';
+
 			return $this->errorResponse($message, Response::HTTP_INTERNAL_SERVER_ERROR, $e, 'api.errors.saveFailed');
 		}
 
@@ -587,12 +633,14 @@ class ApiController extends AbstractController
 
 
 	/**
-	 * Handles bulk deletion of entities by UUID in a single transaction.
+	 * Handles bulk deletion of entities by UUID, all-or-nothing.
 	 *
 	 * Authorization runs once for the whole request, then once per entity with the
 	 * loaded entity as subject — so resource-level rules in isAuthorized() also apply.
+	 *
+	 * @param int|null $maxItems Maximum number of UUIDs per request (413 if exceeded); null for no limit.
 	 */
-	public function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): Response
+	public function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): Response
 	{
 		if ( !$this->can($authLevel, null, $classname, 'delete') )
 		{
@@ -606,44 +654,87 @@ class ApiController extends AbstractController
 			return $this->errorResponse('Expected a JSON array of UUIDs', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
 		}
 
+		if ( $maxItems !== null && count($uuids) > $maxItems )
+		{
+			return $this->tooManyItemsResponse($maxItems);
+		}
+
+		// Resolve and authorize everything first, and only then schedule removals —
+		// so an early return can't leave a partial set of removals in the unit of work.
+		$entities = [];
+
+		foreach ( $uuids as $uuid )
+		{
+			$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+
+			if ( $entity === null )
+			{
+				return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
+			}
+
+			if ( !$this->can($authLevel, $entity, $classname, 'delete') )
+			{
+				return $this->accessDeniedResponse();
+			}
+
+			$entities[] = $entity;
+		}
+
 		try
 		{
-			$this->em->beginTransaction();
-
-			foreach ( $uuids as $uuid )
+			foreach ( $entities as $entity )
 			{
-				$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
-
-				if ( $entity === null )
-				{
-					$this->em->rollback();
-					return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
-				}
-
-				if ( !$this->can($authLevel, $entity, $classname, 'delete') )
-				{
-					$this->em->rollback();
-					return $this->accessDeniedResponse();
-				}
-
 				$this->em->remove($entity);
 			}
 
+			// flush() performs all deletes in a single transaction.
 			$this->em->flush();
-			$this->em->commit();
 		}
 		catch ( Throwable $e )
 		{
-			if ( $this->em->getConnection()->isTransactionActive() )
-			{
-				$this->em->rollback();
-			}
-
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to delete data!';
+
 			return $this->errorResponse($message, Response::HTTP_INTERNAL_SERVER_ERROR, $e, 'api.errors.deleteFailed');
 		}
 
 		return $this->noContentResponse();
+	}
+
+
+
+	/**
+	 * Returns a 413 response for bulk requests exceeding the item limit.
+	 */
+	protected function tooManyItemsResponse(int $maxItems): JsonResponse
+	{
+		return $this->errorResponse("Too many items (maximum: $maxItems)", Response::HTTP_REQUEST_ENTITY_TOO_LARGE, null, 'api.errors.tooManyItems');
+	}
+
+
+
+	/**
+	 * Reverts in-memory changes on managed entities by reloading them from the database,
+	 * so a failed or rejected write can't be persisted by a later flush in the same request.
+	 * Entities that can't be reloaded (e.g. deleted meanwhile) are detached instead.
+	 */
+	private function discardChanges(array $entities): void
+	{
+		if ( !$this->em->isOpen() )
+		{
+			return;
+		}
+
+		foreach ( $entities as $entity )
+		{
+			try
+			{
+				$this->em->refresh($entity);
+			}
+			catch ( Throwable )
+			{
+				$this->em->detach($entity);
+			}
+		}
 	}
 
 

@@ -11,7 +11,7 @@ them reusable for other projects and other people.
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
 
 **Author:** Philip Märksch  
-**Version:** 1.13.0  
+**Version:** 1.14.0  
 **License:** MIT
 
 ---
@@ -203,6 +203,8 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `createdResponse($data)` | `201 { message, ...data }` |
 | `noContentResponse()` | `204` |
 | `accessDeniedResponse()` | `401` for anonymous users, `403` for authenticated ones |
+| `validationErrorResponse($violations)` | `422 { error, key, violations: { field: message } }` |
+| `tooManyItemsResponse($maxItems)` | `413` — returned by the bulk handlers when a request exceeds `$maxItems` |
 | `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — `count` is the number of items on this page, `maxCount` the total matching the search/filters (ignoring only the pagination limit), so the frontend paginator sizes itself to the filtered result set. Items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |
 | `singleResponse($data, $groups)` | `200 { message, data }` — same `ArraySerializable`-aware serialization as `listResponse` |
 
@@ -212,6 +214,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 |---|---|
 | `deserializeInput($class, $request)` | Deserializes request JSON into a DTO. On bad JSON it returns a `400` `JsonResponse` **instead of** the DTO — check `instanceof JsonResponse` before using the result |
 | `validateInput($input)` | Validates a DTO via Symfony Validator; returns `422` with per-field violations or `null` if valid |
+| `collectViolations($input, $prefix)` | Validates an object and returns its violations as a `{ field: message }` array (empty if valid), each key prefixed with `$prefix` |
 | `requireField($data, $key, $filter)` | Extracts a field from decoded JSON; throws `ApiMissingFieldException` if absent or invalid |
 | `missingFieldResponse($e)` | Converts an `ApiMissingFieldException` into a `422` response |
 
@@ -220,10 +223,10 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | Method | Description |
 |---|---|
 | `handleFetch($classname, $uuid, $authLevel, $groups)` | Fetch a single entity by UUID with auth check |
-| `handleCreate($classname, $request, $authLevel)` | Deserialize + persist a new entity |
-| `handleUpdate($classname, $request, $authLevel)` | Deserialize + update an existing entity by UUID |
-| `handleBulk($classname, $request, $authLevel)` | Create or update multiple entities in one transaction; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). |
-| `handleBulkDelete($classname, $request, $authLevel)` | Delete multiple entities by UUID in one transaction. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request and again per entity (`delete` with the entity as subject). |
+| `handleCreate($classname, $request, $authLevel)` | Deserialize, validate + persist a new entity. Returns `422` with violations if the entity is invalid. |
+| `handleUpdate($classname, $request, $authLevel)` | Deserialize, validate + update an existing entity by UUID. Returns `422` with violations if the result is invalid; the rejected changes are discarded. |
+| `handleBulk($classname, $request, $authLevel, $maxItems = 1000)` | Create or update multiple entities, all-or-nothing; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). Every item is validated; see [Bulk endpoints](#bulk-endpoints--recommended-route-convention). |
+| `handleBulkDelete($classname, $request, $authLevel, $maxItems = 1000)` | Delete multiple entities by UUID, all-or-nothing. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request and again per entity (`delete` with the entity as subject). |
 | `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON. |
 | `getEntity($classname, $uuid, $authLevel)` | Fetch a single entity object (no serialization) |
 | `getEntityList($repository, $searchParams, $authLevel)` | Fetch a list of entity objects (no serialization) |
@@ -309,6 +312,21 @@ Bulk delete request body (array of UUIDs):
 ["uuid-1", "uuid-2", "uuid-3"]
 ```
 
+Both bulk requests are **all-or-nothing**: if any item is not found (`404`), not permitted (`403`) or invalid, nothing is written.
+
+**Validation.** Each item is validated against the entity's Symfony Validator constraints. Violations for all items are returned together, keyed `<index>.<field>`:
+
+```json
+{ "error": "Validation failed", "key": "api.errors.validationFailed", "violations": { "1.name": "This value should not be blank." } }
+```
+
+**Item limit.** Both handlers accept at most `$maxItems` items per request (default `1000`) and return `413` (`key: api.errors.tooManyItems`) above that. Choose a limit per endpoint, or pass `null` to disable it:
+
+```php
+return $this->handleBulk(Booking::class, $request, 'ROLE_ADMIN', maxItems: 200);
+return $this->handleBulk(LogEntry::class, $request, 'ROLE_ADMIN', maxItems: null); // no limit
+```
+
 > **Note:** UUID-to-entity resolution for relation fields (e.g. `"owner": "some-uuid"`) requires a `UuidEntityDenormalizer` registered in the consuming application. This is intentionally kept out of the package since it depends on the app's Doctrine setup.
 
 ---
@@ -346,6 +364,18 @@ Thrown by `requireField()` and `JsonHelper::require()` when a required field is 
 
 ## Changelog
 
+### 1.14.0
+
+**Features**
+
+- `handleCreate()`, `handleUpdate()` and `handleBulk()` validate entities with the Symfony Validator and return `422` with per-field violations (bulk: keyed `<index>.<field>`). Entities without constraints are unaffected. Rejected changes on managed entities are discarded.
+- `handleBulk()` and `handleBulkDelete()` take an optional `$maxItems` limit (default `1000`, `null` for none) and return `413` above it.
+- New `collectViolations()` and `tooManyItemsResponse()` helpers.
+
+**Fixes**
+
+- Bulk requests are now truly all-or-nothing: previously a `404`/`403` part-way through could leave earlier changes (or scheduled deletions) in Doctrine's unit of work, to be written by any later `flush()` in the same request.
+
 ### 1.13.0
 
 **Fixes**
@@ -355,7 +385,7 @@ Thrown by `requireField()` and `JsonHelper::require()` when a required field is 
 - `ApiRepository::searchRandom()` no longer relies on a non-standard `RAND()` DQL function and works on every database Doctrine supports. It now also honours `getMaxLimit()`.
 - LIKE-based filters (`contains`, `notContains`, `startsWith`, `endsWith`) match `%` and `_` literally instead of as wildcards.
 - Malformed search payloads (non-object bodies, filters/sorts of the wrong shape) return `400` or are ignored instead of causing a `500`.
-- `handleBulk()` / `handleBulkDelete()` run authorization per item with the entity as subject, so resource-level rules in `isAuthorized()` also apply to bulk writes. Malformed bulk bodies return `400`, and the transaction is always rolled back on failure.
+- `handleBulk()` / `handleBulkDelete()` run authorization per item with the entity as subject, so resource-level rules in `isAuthorized()` also apply to bulk writes. Malformed bulk bodies return `400`.
 - Added the missing `symfony/security-bundle` dependency.
 
 **Changes**
