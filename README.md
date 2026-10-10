@@ -8,7 +8,7 @@ This is a lightweight Symfony library that helps to build a RESTful API. It was 
 in other private projects of mine. I finally decided to create a standalone package combining the many useful bits from each project and tried to make 
 them reusable for other projects and other people.
 
-It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic compatible with PrimeVue / Vuetify DataTable payloads.
+It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic. Filters use the format PrimeVue DataTables send.
 
 **Author:** Philip Märksch  
 **Version:** 1.14.0  
@@ -27,18 +27,17 @@ It features a set of abstract base classes for Symfony API backends, providing g
 
 ## Installation
 
-Add the package to your Symfony project via a [Composer path repository](https://getcomposer.org/doc/05-repositories.md#path):
+kohlrAPI is not on Packagist. Add the GitHub repository as a [Composer VCS repository](https://getcomposer.org/doc/05-repositories.md#vcs) to your Symfony project:
 
 ```json
 "repositories": [
     {
-        "type": "path",
-        "url": "packages/kohlrapi",
-        "options": { "symlink": true }
+        "type": "vcs",
+        "url": "https://github.com/pmaerksch/kohlrapi"
     }
 ],
 "require": {
-    "pmaerksch/kohlrapi": "*"
+    "pmaerksch/kohlrapi": "^1.14"
 }
 ```
 
@@ -288,7 +287,7 @@ Immutable bundle passed to `isAuthorized()`. Built by `can()` — you never cons
 | `$user` | `?object` | The authenticated user, or `null` |
 | `$request` | `?Request` | The current HTTP request, when available |
 
-> **Note:** for `fetch`/`update` the entity is loaded *before* the auth check so it is available as `$subject` (enabling per-resource decisions). The default Symfony implementation ignores `$subject`, so its behavior is unchanged.
+> **Note:** for `fetch`/`update` the entity is loaded *before* the auth check so it is available as `$subject` (enabling per-resource decisions). The default Symfony implementation passes `$subject` on to `isGranted()`, so your voters receive the entity.
 
 #### Bulk endpoints — recommended route convention
 

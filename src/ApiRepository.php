@@ -1,8 +1,8 @@
 <?php
 
 /**
- * ApiRepository — Abstract base repository providing generic search, filter, and sort logic
- * compatible with PrimeVue / Vuetify DataTable payloads.
+ * ApiRepository — Abstract base repository providing generic search, filter, and sort logic.
+ * Filters use the format PrimeVue DataTables send.
  *
  * @author  Philip Märksch
  *
