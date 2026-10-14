@@ -384,6 +384,18 @@ Thrown by `requireField()` and `JsonHelper::require()` when a required field is 
 
 ---
 
+## Development
+
+```bash
+composer install
+composer test      # PHPUnit: Doctrine ORM on in-memory SQLite + the real Symfony serializer/validator
+composer analyse   # PHPStan, level 8
+```
+
+CI runs both on PHP 8.2–8.5, plus once with the lowest allowed dependency versions.
+
+---
+
 ## Changelog
 
 ### 2.0.0
