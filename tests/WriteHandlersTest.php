@@ -287,6 +287,18 @@ class WriteHandlersTest extends KohlrapiTestCase
 
 
 
+	public function testBulkAcceptsWhatSingleCreateAccepts(): void
+	{
+		// 1e400 decodes to INF, which json_encode() can't re-encode; an ignored extra
+		// attribute must not break a bulk item when the same payload creates fine alone.
+		$payload = '{"name":"a","ignored":1e400}';
+
+		$this->assertSame(201, $this->controller()->handleCreate(Item::class, $this->request($payload))->getStatusCode());
+		$this->assertSame(200, $this->controller()->handleBulk(Item::class, $this->request("[$payload]"))->getStatusCode());
+	}
+
+
+
 	public function testBulkWrongValueTypeIs400(): void
 	{
 		$response = $this->controller()->handleBulk(Item::class, $this->request('[{"name":"a","qty":"lots"}]'));

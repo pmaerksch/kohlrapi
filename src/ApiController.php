@@ -38,6 +38,7 @@ use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
 use Symfony\Component\Serializer\Exception\NotEncodableValueException;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
+use Symfony\Component\Serializer\Normalizer\DenormalizerInterface;
 use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\SerializerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
@@ -634,7 +635,7 @@ class ApiController extends AbstractController
 
 					$updated[] = $entity;
 
-					$this->serializer->deserialize(json_encode($data), $classname, 'json', [...$updateContext, AbstractNormalizer::OBJECT_TO_POPULATE => $entity]);
+					$this->denormalizeItem($data, $classname, [...$updateContext, AbstractNormalizer::OBJECT_TO_POPULATE => $entity]);
 					$operation = 'update.after';
 				}
 				else
@@ -645,7 +646,7 @@ class ApiController extends AbstractController
 						return $this->accessDeniedResponse();
 					}
 
-					$entity = $this->requireApiEntity($this->serializer->deserialize(json_encode($data), $classname, 'json', $createContext));
+					$entity = $this->requireApiEntity($this->denormalizeItem($data, $classname, $createContext));
 
 					$created[] = $entity;
 					$operation = 'create.after';
@@ -853,6 +854,38 @@ class ApiController extends AbstractController
 		}
 
 		return $this->errorResponse('Invalid request data: ' . $e->getMessage(), Response::HTTP_BAD_REQUEST, $e, 'api.errors.invalidBody');
+	}
+
+
+
+	/**
+	 * Turns one already-decoded bulk item into an entity. Denormalizing the decoded
+	 * array directly is exactly what deserialize() does after its own json_decode();
+	 * re-encoding instead would fail on values json_encode() can't write (e.g. 1e400,
+	 * which decodes to INF), rejecting items a single create accepts.
+	 *
+	 * @param array<mixed> $data
+	 * @param class-string $classname
+	 * @param array<string, mixed> $context
+	 * @throws ExceptionInterface If the item can't be turned into the entity.
+	 */
+	private function denormalizeItem(array $data, string $classname, array $context): mixed
+	{
+		if ( $this->serializer instanceof DenormalizerInterface )
+		{
+			return $this->serializer->denormalize($data, $classname, 'json', $context);
+		}
+
+		try
+		{
+			$json = json_encode($data, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+		}
+		catch ( \JsonException $e )
+		{
+			throw new NotEncodableValueException($e->getMessage(), 0, $e);
+		}
+
+		return $this->serializer->deserialize($json, $classname, 'json', $context);
 	}
 
 
