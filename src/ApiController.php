@@ -49,6 +49,9 @@ class ApiController extends AbstractController
 	protected ValidatorInterface     $validator;
 	protected RequestStack           $requestStack;
 
+	/** Classes already reported as written without a field restriction (one deprecation per class and controller instance). */
+	private array $unrestrictedWarned = [];
+
 
 
 	public function __construct(EntityManagerInterface $em, SerializerInterface $serializer, KernelInterface $kernel, protected LoggerInterface $logger, ValidatorInterface $validator, RequestStack $requestStack)
@@ -431,7 +434,7 @@ class ApiController extends AbstractController
 
 		try
 		{
-			$entity     = $this->serializer->deserialize($request->getContent(), $classname, 'json', ['ignored_attributes' => ['uuid']]);
+			$entity     = $this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'create'));
 			$violations = $this->collectViolations($entity);
 
 			if ( count($violations) > 0 )
@@ -489,10 +492,7 @@ class ApiController extends AbstractController
 
 		try
 		{
-			$this->serializer->deserialize($request->getContent(), $classname, 'json', [
-				AbstractNormalizer::OBJECT_TO_POPULATE => $entity,
-				'ignored_attributes'                   => ['uuid']
-			]);
+			$this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
 
 			$violations = $this->collectViolations($entity);
 
@@ -592,10 +592,7 @@ class ApiController extends AbstractController
 
 					$updated[] = $entity;
 
-					$this->serializer->deserialize(json_encode($data), $classname, 'json', [
-						AbstractNormalizer::OBJECT_TO_POPULATE => $entity,
-						'ignored_attributes'                   => ['uuid'],
-					]);
+					$this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
 				}
 				else
 				{
@@ -605,9 +602,7 @@ class ApiController extends AbstractController
 						return $this->accessDeniedResponse();
 					}
 
-					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', [
-						'ignored_attributes' => ['uuid'],
-					]);
+					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'create'));
 
 					$created[] = $entity;
 				}
@@ -714,6 +709,60 @@ class ApiController extends AbstractController
 		}
 
 		return $this->noContentResponse();
+	}
+
+
+
+	/**
+	 * Serializer context for turning a client payload into an entity in handleCreate(),
+	 * handleUpdate() and handleBulk(). Override it to restrict which fields a client
+	 * may write — without a restriction, every property with a setter (or public) can
+	 * be set by the payload, including ones like roles, owner or password:
+	 *
+	 *     protected function getDenormalizationContext(string $classname, string $operation): array
+	 *     {
+	 *         return ['groups' => ['write']];
+	 *         // or: return [AbstractNormalizer::ATTRIBUTES => ['name', 'notes']];
+	 *     }
+	 *
+	 * The default ([]) allows every writable property and is deprecated: from 2.0 on,
+	 * the context must set 'groups' or 'attributes'. The uuid is always ignored,
+	 * whatever this returns.
+	 *
+	 * @param string $classname FQCN of the entity being written.
+	 * @param string $operation 'create' | 'update'
+	 */
+	protected function getDenormalizationContext(string $classname, string $operation): array
+	{
+		return [];
+	}
+
+
+
+	/**
+	 * Builds the full deserialization context: the subclass context from
+	 * getDenormalizationContext(), plus the always-ignored uuid and, for updates,
+	 * the entity to populate.
+	 */
+	private function denormalizationContext(string $classname, string $operation, ?object $populate = null): array
+	{
+		$context = $this->getDenormalizationContext($classname, $operation);
+
+		if ( !isset($context[ AbstractNormalizer::GROUPS ]) && !isset($context[ AbstractNormalizer::ATTRIBUTES ]) && !isset($this->unrestrictedWarned[ $classname ]) )
+		{
+			$this->unrestrictedWarned[ $classname ] = true;
+			trigger_deprecation('pmaerksch/kohlrapi', '1.15', 'Writing "%s" without "groups" or "attributes" in getDenormalizationContext() lets clients set every writable property; this will be required in 2.0.', $classname);
+		}
+
+		// The uuid is server-assigned: a payload must never set or change it.
+		$context[ AbstractNormalizer::IGNORED_ATTRIBUTES ] = array_merge($context[ AbstractNormalizer::IGNORED_ATTRIBUTES ] ?? [], ['uuid']);
+
+		if ( $populate !== null )
+		{
+			$context[ AbstractNormalizer::OBJECT_TO_POPULATE ] = $populate;
+		}
+
+		return $context;
 	}
 
 

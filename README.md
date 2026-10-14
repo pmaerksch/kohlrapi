@@ -237,6 +237,23 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 |---|---|
 | `resolveByUuid($classname, $uuid)` | Resolves a UUID string to a Doctrine entity instance, or `null` if not found. Useful in custom create/update methods when relations are sent as UUIDs from the frontend. |
 
+#### Writable fields
+
+`handleCreate`, `handleUpdate` and `handleBulk` deserialize the client payload straight into the entity. Without a restriction, **every property with a setter (or public) can be set by the client** — including fields like `roles`, `owner` or `password`. Only `uuid` is always ignored.
+
+Restrict the writable fields by overriding `getDenormalizationContext()` and returning serializer `groups` or `attributes`:
+
+```php
+protected function getDenormalizationContext(string $classname, string $operation): array
+{
+    // $operation is 'create' or 'update'
+    return ['groups' => ['write']];
+    // or: return [AbstractNormalizer::ATTRIBUTES => ['name', 'notes']];
+}
+```
+
+The unrestricted default is deprecated (a deprecation is logged once per entity class) and will be rejected in 2.0.
+
 #### Authorization
 
 Every `handle*` and `getEntity*` helper takes an `$authLevel` and routes the check through two methods:
