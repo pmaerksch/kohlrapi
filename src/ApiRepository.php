@@ -373,8 +373,10 @@ abstract class ApiRepository extends ServiceEntityRepository
 					continue;
 				}
 
+				// switch compares loosely, so a non-string matchMode (e.g. true) would hit the
+				// first case; only strings select a mode, anything else means 'contains'.
 				$value     = $constraint['value'] ?? null;
-				$matchMode = $constraint['matchMode'] ?? 'contains';
+				$matchMode = is_string($constraint['matchMode'] ?? null) ? $constraint['matchMode'] : 'contains';
 
 				if ( $value === null || $value === '' )
 				{

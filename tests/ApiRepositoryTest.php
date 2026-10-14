@@ -44,7 +44,7 @@ class ApiRepositoryTest extends KohlrapiTestCase
 
 
 
-	private static function filter(string $matchMode, mixed $value, string $operator = 'and'): array
+	private static function filter(mixed $matchMode, mixed $value, string $operator = 'and'): array
 	{
 		return ['operator' => $operator, 'constraints' => [['value' => $value, 'matchMode' => $matchMode]]];
 	}
@@ -66,6 +66,8 @@ class ApiRepositoryTest extends KohlrapiTestCase
 			'gte'         => [['qty' => self::filter('gte', 4)], ['50% off', 'a_b']],
 			'in'          => [['name' => self::filter('in', ['apple', 'cherry'])], ['apple', 'cherry']],
 			'default'     => [['name' => self::filter('unknownMode', 'err')], ['cherry']],
+			'bool mode'   => [['name' => self::filter(true, 'err')], ['cherry']],
+			'int mode'    => [['name' => self::filter(0, 'err')], ['cherry']],
 		];
 	}
 
