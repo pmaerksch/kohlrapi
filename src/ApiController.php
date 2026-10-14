@@ -232,6 +232,17 @@ class ApiController extends AbstractController
 
 
 	/**
+	 * Returns 404 with the key `api.errors.recordNotFound` — for an entity that is
+	 * missing, or that the user may not see (see {@see getEntity()}).
+	 */
+	protected function notFoundResponse(): JsonResponse
+	{
+		return $this->errorResponse('Record not found!', Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
+	}
+
+
+
+	/**
 	 * Deserializes the JSON request body into an object of the specified class.
 	 * Validates the request body and handles errors for missing or invalid JSON data.
 	 *
@@ -524,7 +535,7 @@ class ApiController extends AbstractController
 
 		if ( is_null($entity) )
 		{
-			return $this->errorResponse('Record not found!', Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
+			return $this->notFoundResponse();
 		}
 
 		$context = $this->denormalizationContext($classname, 'update', $entity);

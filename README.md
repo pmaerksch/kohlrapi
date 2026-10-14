@@ -11,7 +11,7 @@ them reusable for other projects and other people.
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic. Filters use the format PrimeVue DataTables send.
 
 **Author:** Philip Märksch  
-**Version:** 2.0.0  
+**Version:** 2.1.0  
 **License:** MIT
 
 ---
@@ -37,7 +37,7 @@ kohlrAPI is not on Packagist. Add the GitHub repository as a [Composer VCS repos
     }
 ],
 "require": {
-    "pmaerksch/kohlrapi": "^2.0"
+    "pmaerksch/kohlrapi": "^2.1"
 }
 ```
 
@@ -209,6 +209,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `createdResponse($data)` | `201 { message, ...data }` |
 | `noContentResponse()` | `204` |
 | `accessDeniedResponse()` | `401` for anonymous users, `403` for authenticated ones |
+| `notFoundResponse()` | `404 { error, key: 'api.errors.recordNotFound' }` — for an entity that is missing or that the user may not see, so both look the same |
 | `validationErrorResponse($violations)` | `422 { error, key, violations: { field: message } }` |
 | `tooManyItemsResponse($maxItems)` | `413 { …, maxItems }` — returned by the bulk handlers when a request exceeds `$maxItems` |
 | `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — `count` is the number of items on this page, `maxCount` the total matching the search/filters (ignoring only the pagination limit), so the frontend paginator sizes itself to the filtered result set. Items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |

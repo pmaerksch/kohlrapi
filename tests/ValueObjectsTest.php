@@ -104,6 +104,16 @@ class ValueObjectsTest extends KohlrapiTestCase
 
 
 
+	public function testNotFoundResponse(): void
+	{
+		$response = (fn() => $this->notFoundResponse())->call($this->controller());
+
+		$this->assertSame(404, $response->getStatusCode());
+		$this->assertSame('api.errors.recordNotFound', $this->body($response)['key']);
+	}
+
+
+
 	public function testDetailsCannotOverrideErrorOrKey(): void
 	{
 		$controller = $this->controller();

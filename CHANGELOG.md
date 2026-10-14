@@ -1,11 +1,23 @@
 # Changelog
 
 All notable changes to kohlrAPI. Versions follow [Semantic Versioning](https://semver.org/):
-1.15.0 is fully backwards compatible with 1.14.0; 2.0.0 contains breaking changes, listed under
-[Upgrading from 1.x](#upgrading-from-1x).
+1.15.0 is fully backwards compatible with 1.14.0, and 2.1.0 with 2.0.0; 2.0.0 contains breaking
+changes, listed under [Upgrading from 1.x](#upgrading-from-1x).
 
 IDs such as S1 or E4 refer to findings of the code audits of 1.14.0 (S = security, E = error)
 and of the first 2.0.0 draft (N). Commit hashes refer to this repository.
+
+---
+
+## 2.1.0
+
+No breaking changes.
+
+### Features
+
+- **`notFoundResponse()`:** `404` with the key `api.errors.recordNotFound`, next to
+  `accessDeniedResponse()`. Apps that wrote this response by hand in their own actions can
+  use it instead. `handleUpdate()` uses it too; its response is unchanged.
 
 ---
 
