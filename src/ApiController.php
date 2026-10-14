@@ -424,7 +424,7 @@ class ApiController extends AbstractController
 	 * @param string $authLevel Required authorization level to perform the operation. Defaults to 'ROLE_ADMIN'.
 	 * @return JsonResponse 201 { uuid } on success; 401/403, 400 (empty or malformed body), 422 (validation failed) or 500 otherwise.
 	 */
-	public function handleCreate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
+	protected function handleCreate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
 		if ( !$this->can($authLevel, null, $classname, 'create') )
 		{
@@ -481,7 +481,7 @@ class ApiController extends AbstractController
 	 * @param Request $request The HTTP request containing the update data.
 	 * @return JsonResponse 200 on success; 401/403, 400 (empty or malformed body), 404, 422 (validation failed) or 500 otherwise.
 	 */
-	public function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
+	protected function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
 		// Loaded before the auth check so the entity is available as the
 		// authorization subject (for resource-level decisions).
@@ -556,7 +556,7 @@ class ApiController extends AbstractController
 	 *
 	 * @param int|null $maxItems Maximum number of items per request (413 if exceeded); null for no limit.
 	 */
-	public function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): JsonResponse
+	protected function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): JsonResponse
 	{
 		if ( !$this->can($authLevel, null, $classname, 'bulk') )
 		{
@@ -682,7 +682,7 @@ class ApiController extends AbstractController
 	 *
 	 * @param int|null $maxItems Maximum number of UUIDs per request (413 if exceeded); null for no limit.
 	 */
-	public function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): Response
+	protected function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): Response
 	{
 		if ( !$this->can($authLevel, null, $classname, 'delete') )
 		{
