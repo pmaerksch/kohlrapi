@@ -970,18 +970,19 @@ class ApiController extends AbstractController
 
 
 	/**
-	 * Return true to authorize every write a second time, after the payload has been
+	 * Whether every write is authorized a second time, after the payload has been
 	 * applied and before anything is flushed: with operation 'create.after' or
 	 * 'update.after' and the resulting entity as subject. Without it, an update is only
 	 * checked against the entity's state *before* the change — so a payload could move
 	 * an entity to another owner or tenant that the user has no rights on.
 	 *
-	 * Off by default for backwards compatibility: with it on, the default isAuthorized()
-	 * calls isGranted() a second time, and voters/overrides must handle the new operations.
+	 * On by default. The default isAuthorized() then calls isGranted() a second time,
+	 * with the resulting entity as subject; voters and overrides must handle (or
+	 * deliberately allow) the two operations. Override and return false to opt out.
 	 */
 	protected function reauthorizesWrites(): bool
 	{
-		return false;
+		return true;
 	}
 
 

@@ -25,6 +25,17 @@ class ReauthorizationTest extends KohlrapiTestCase
 
 
 
+	public function testOnByDefault(): void
+	{
+		$item     = $this->createItem('a');
+		$response = $this->ownerChecked(null)->handleUpdate(Item::class, $this->request('{"owner":"bob"}', ['uuid' => $item->getUuid()]));
+
+		$this->assertSame(401, $response->getStatusCode());
+		$this->assertSame('alice', $this->reload($item)?->getOwner());
+	}
+
+
+
 	public function testOffAllowsMovingAnEntity(): void
 	{
 		$item     = $this->createItem('a');

@@ -21,7 +21,8 @@ final class AuthorizationContext
 	 * @param string|null $subjectClass FQCN of the entity the action concerns, when known (set even when no instance exists yet, e.g. create/search).
 	 * @param object|null $subject The entity instance the action concerns, when one has been loaded (fetch/update).
 	 * @param string|null $operation The CRUD operation: 'search' | 'fetch' | 'create' | 'update' | 'bulk' | 'delete',
-	 *                               or 'create.after' | 'update.after' when {@see ApiController::reauthorizesWrites()} is on.
+	 *                               or 'create.after' | 'update.after' for the second check on writes
+	 *                               (see {@see ApiController::reauthorizesWrites()}, on by default).
 	 * @param object|null $user The authenticated user (Symfony UserInterface), or null when unauthenticated.
 	 * @param Request|null $request The current HTTP request, when one is available.
 	 */

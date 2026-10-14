@@ -288,12 +288,14 @@ abstract class BaseController extends ApiController
 
 Routing every check through `can()` keeps authorization to a single chokepoint that your `isAuthorized()` override fully controls.
 
-**Checking the result of a write:** by default an update is authorized against the entity *before* the payload is applied, so a payload could e.g. move the entity to an owner or tenant the user has no rights on. Override `reauthorizesWrites()` to return `true` and every create/update (including bulk items) is checked again after the payload has been applied and before anything is written — with operation `create.after` / `update.after` and the resulting entity as `$subject`. A denial discards the changes and returns `401`/`403`.
+**Checking the result of a write:** checking an update only against the entity *before* the payload is applied would let a payload e.g. move the entity to an owner or tenant the user has no rights on. So every create/update (including bulk items) is checked again after the payload has been applied and before anything is written — with operation `create.after` / `update.after` and the resulting entity as `$subject`. A denial discards the changes and returns `401`/`403`.
+
+Voters and `isAuthorized()` overrides must handle (or deliberately allow) these two operations. To turn the second check off for a controller:
 
 ```php
 protected function reauthorizesWrites(): bool
 {
-    return true;
+    return false;
 }
 ```
 
@@ -306,7 +308,7 @@ Immutable bundle passed to `isAuthorized()`. Built by `can()` — you never cons
 | `$action` | `string` | The requested permission token (a role for the default impl) |
 | `$subjectClass` | `?string` | FQCN of the entity the action concerns, when known (set even with no instance, e.g. create/search) |
 | `$subject` | `?object` | The loaded entity the action concerns (fetch/update); `null` otherwise |
-| `$operation` | `?string` | `'search' \| 'fetch' \| 'create' \| 'update' \| 'bulk' \| 'delete'`, plus `'create.after' \| 'update.after'` with `reauthorizesWrites()` |
+| `$operation` | `?string` | `'search' \| 'fetch' \| 'create' \| 'update' \| 'bulk' \| 'delete'`, plus `'create.after' \| 'update.after'` for the second check on writes (see `reauthorizesWrites()`) |
 | `$user` | `?object` | The authenticated user, or `null` |
 | `$request` | `?Request` | The current HTTP request, when available |
 
