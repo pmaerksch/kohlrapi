@@ -74,9 +74,11 @@ class ApiController extends AbstractController
 	 * Generates an error response with a given message and HTTP status code.
 	 * @param string $message The error message to include in the response.
 	 * @param int $status The HTTP status code to set for the response.
+	 * @param array<string, mixed> $details Structured, client-safe details (e.g. the field name) sent
+	 *                                      to every user, unlike $message. Can't override error/key.
 	 * @return JsonResponse JSON response containing the error message and status code.
 	 */
-	protected function errorResponse(string $message, int $status, ?Throwable $e = null, string $key = ''): JsonResponse
+	protected function errorResponse(string $message, int $status, ?Throwable $e = null, string $key = '', array $details = []): JsonResponse
 	{
 		$this->logger->error($message, $e ? ['exception' => $e] : ['status' => $status]);
 
@@ -87,7 +89,7 @@ class ApiController extends AbstractController
 		$user      = $this->getUser();
 		$mayDetail = $user instanceof ErrorDetailAware && $user->showsErrorDetails();
 
-		return new JsonResponse(['error' => $mayDetail ? $message : null, 'key' => $key], $status);
+		return new JsonResponse(['error' => $mayDetail ? $message : null, 'key' => $key] + $details, $status);
 	}
 
 
@@ -348,7 +350,7 @@ class ApiController extends AbstractController
 	 */
 	protected function missingFieldResponse(ApiMissingFieldException $e): JsonResponse
 	{
-		return $this->errorResponse($e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, null, 'api.errors.missingField');
+		return $this->errorResponse($e->getMessage(), Response::HTTP_UNPROCESSABLE_ENTITY, null, 'api.errors.missingField', ['field' => $e->getField()]);
 	}
 
 
@@ -627,7 +629,7 @@ class ApiController extends AbstractController
 					if ( $entity === null || !$this->can($authLevel, $entity, $classname, 'update') )
 					{
 						$this->discardChanges($updated);
-						return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
+						return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound', ['uuid' => $uuid]);
 					}
 
 					$updated[] = $entity;
@@ -731,7 +733,7 @@ class ApiController extends AbstractController
 			// Not permitted is reported exactly like not found (see handleBulk()).
 			if ( $entity === null || !$this->can($authLevel, $entity, $classname, 'delete') )
 			{
-				return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
+				return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound', ['uuid' => $uuid]);
 			}
 
 			$entities[] = $entity;
@@ -833,7 +835,7 @@ class ApiController extends AbstractController
 	 */
 	protected function tooManyItemsResponse(int $maxItems): JsonResponse
 	{
-		return $this->errorResponse("Too many items (maximum: $maxItems)", Response::HTTP_REQUEST_ENTITY_TOO_LARGE, null, 'api.errors.tooManyItems');
+		return $this->errorResponse("Too many items (maximum: $maxItems)", Response::HTTP_REQUEST_ENTITY_TOO_LARGE, null, 'api.errors.tooManyItems', ['maxItems' => $maxItems]);
 	}
 
 

@@ -86,6 +86,36 @@ class ValueObjectsTest extends KohlrapiTestCase
 
 
 
+	public function testStructuredDetailsReachEveryUser(): void
+	{
+		$controller = $this->controller(null, new TestUser('alice', false));
+
+		$missing = $this->body((fn() => $this->missingFieldResponse(new ApiMissingFieldException('name')))->call($controller));
+		$this->assertNull($missing['error']);
+		$this->assertSame('name', $missing['field']);
+
+		$tooMany = $this->body($controller->handleBulk(Item::class, $this->request('[{"name":"a"},{"name":"b"}]'), 'ROLE_ADMIN', 1));
+		$this->assertSame(1, $tooMany['maxItems']);
+
+		$uuid     = 'a3c1b2d4-0000-4000-8000-000000000000';
+		$notFound = $this->body($controller->handleBulkDelete(Item::class, $this->request(json_encode([$uuid]))));
+		$this->assertSame($uuid, $notFound['uuid']);
+	}
+
+
+
+	public function testDetailsCannotOverrideErrorOrKey(): void
+	{
+		$controller = $this->controller();
+		$body       = $this->body((fn() => $this->errorResponse('secret', 400, null, 'k', ['error' => 'x', 'key' => 'y', 'extra' => 1]))->call($controller));
+
+		$this->assertNull($body['error']);
+		$this->assertSame('k', $body['key']);
+		$this->assertSame(1, $body['extra']);
+	}
+
+
+
 	public function testDeniedIs403ForAuthenticatedUsers(): void
 	{
 		$controller             = $this->controller(null, new TestUser());

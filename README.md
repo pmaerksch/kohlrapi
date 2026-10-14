@@ -204,13 +204,13 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 
 | Method | Returns |
 |---|---|
-| `errorResponse($message, $status)` | `{ error, key }` — the `error` detail is only exposed to users implementing [`ErrorDetailAware`](#errordetailaware); otherwise `null` |
+| `errorResponse($message, $status, $e, $key, $details)` | `{ error, key, ...details }` — the `error` detail is only exposed to users implementing [`ErrorDetailAware`](#errordetailaware); otherwise `null`. `$details` are structured, client-safe fields sent to everyone |
 | `successResponse($data)` | `200 { message, ...data }` |
 | `createdResponse($data)` | `201 { message, ...data }` |
 | `noContentResponse()` | `204` |
 | `accessDeniedResponse()` | `401` for anonymous users, `403` for authenticated ones |
 | `validationErrorResponse($violations)` | `422 { error, key, violations: { field: message } }` |
-| `tooManyItemsResponse($maxItems)` | `413` — returned by the bulk handlers when a request exceeds `$maxItems` |
+| `tooManyItemsResponse($maxItems)` | `413 { …, maxItems }` — returned by the bulk handlers when a request exceeds `$maxItems` |
 | `listResponse($items, $groups, $count, $maxCount)` | `200 { message, items, count?, maxCount? }` — `count` is the number of items on this page, `maxCount` the total matching the search/filters (ignoring only the pagination limit), so the frontend paginator sizes itself to the filtered result set. Items implementing `ArraySerializable` are serialized via `getDataAsArray()`, others via the serializer + `$groups` |
 | `singleResponse($data, $groups)` | `200 { message, data }` — same `ArraySerializable`-aware serialization as `listResponse` |
 
@@ -222,7 +222,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `validateInput($input)` | Validates a DTO via Symfony Validator; returns `422` with per-field violations or `null` if valid |
 | `collectViolations($input, $prefix)` | Validates an object and returns its violations as a `{ field: message }` array (empty if valid), each key prefixed with `$prefix` |
 | `requireField($data, $key, $filter)` | Extracts a field from decoded JSON; throws `ApiMissingFieldException` if absent or invalid |
-| `missingFieldResponse($e)` | Converts an `ApiMissingFieldException` into a `422` response |
+| `missingFieldResponse($e)` | Converts an `ApiMissingFieldException` into a `422 { …, field }` response |
 
 **Generic CRUD handlers:**
 
@@ -346,7 +346,7 @@ Bulk delete request body (array of UUIDs):
 ["uuid-1", "uuid-2", "uuid-3"]
 ```
 
-Both bulk requests are **all-or-nothing**: if any item is not found or not permitted (both `404`, see below) or invalid, nothing is written.
+Both bulk requests are **all-or-nothing**: if any item is not found or not permitted (both `404 { …, uuid }`, see below) or invalid, nothing is written.
 
 **Validation.** Each item is validated against the entity's Symfony Validator constraints. Violations for all items are returned together, keyed `<index>.<field>`:
 
