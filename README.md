@@ -222,8 +222,8 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | Method | Description |
 |---|---|
 | `handleFetch($classname, $uuid, $authLevel, $groups)` | Fetch a single entity by UUID with auth check |
-| `handleCreate($classname, $request, $authLevel)` | Deserialize, validate + persist a new entity. Returns `422` with violations if the entity is invalid. |
-| `handleUpdate($classname, $request, $authLevel)` | Deserialize, validate + update an existing entity by UUID. Returns `422` with violations if the result is invalid; the rejected changes are discarded. |
+| `handleCreate($classname, $request, $authLevel)` | Deserialize, validate + persist a new entity. Returns `400` if the body is malformed (invalid JSON, wrong value types) and `422` with violations if the entity is invalid. |
+| `handleUpdate($classname, $request, $authLevel)` | Deserialize, validate + update an existing entity by UUID. Returns `400` if the body is malformed and `422` with violations if the result is invalid; the rejected changes are discarded. |
 | `handleBulk($classname, $request, $authLevel, $maxItems = 1000)` | Create or update multiple entities, all-or-nothing; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). Every item is validated; see [Bulk endpoints](#bulk-endpoints--recommended-route-convention). |
 | `handleBulkDelete($classname, $request, $authLevel, $maxItems = 1000)` | Delete multiple entities by UUID, all-or-nothing. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request and again per entity (`delete` with the entity as subject). |
 | `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON. |

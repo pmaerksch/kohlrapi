@@ -35,6 +35,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
+use Symfony\Component\Serializer\Exception\NotEncodableValueException;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
@@ -414,7 +415,7 @@ class ApiController extends AbstractController
 	 * @param string $classname Fully qualified class name of the entity to be created.
 	 * @param Request $request HTTP request containing the serialized entity data in JSON format.
 	 * @param string $authLevel Required authorization level to perform the operation. Defaults to 'ROLE_ADMIN'.
-	 * @return JsonResponse 201 { uuid } on success; 401/403, 400 (empty body), 422 (validation failed) or 500 otherwise.
+	 * @return JsonResponse 201 { uuid } on success; 401/403, 400 (empty or malformed body), 422 (validation failed) or 500 otherwise.
 	 */
 	public function handleCreate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
@@ -441,7 +442,11 @@ class ApiController extends AbstractController
 			$this->em->persist($entity);
 			$this->em->flush();
 		}
-		catch ( Exception $e )
+		catch ( ExceptionInterface $e )
+		{
+			return $this->invalidPayloadResponse($e);
+		}
+		catch ( Throwable $e )
 		{
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to save data!';
 
@@ -459,7 +464,7 @@ class ApiController extends AbstractController
 	 * changes are discarded (so a later flush in the same request can't persist them) and 422 is returned.
 	 * @param string $classname The class name of the entity to update.
 	 * @param Request $request The HTTP request containing the update data.
-	 * @return JsonResponse 200 on success; 401/403, 400 (empty body), 404, 422 (validation failed) or 500 otherwise.
+	 * @return JsonResponse 200 on success; 401/403, 400 (empty or malformed body), 404, 422 (validation failed) or 500 otherwise.
 	 */
 	public function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
@@ -499,7 +504,12 @@ class ApiController extends AbstractController
 
 			$this->em->flush();
 		}
-		catch ( Exception $e )
+		catch ( ExceptionInterface $e )
+		{
+			$this->discardChanges([$entity]);
+			return $this->invalidPayloadResponse($e);
+		}
+		catch ( Throwable $e )
 		{
 			$this->discardChanges([$entity]);
 			$message = $this->kernel->getEnvironment() === 'dev' ? $e->getMessage() : 'Failed to save data!';
@@ -620,6 +630,11 @@ class ApiController extends AbstractController
 			// flush() writes all inserts and updates in a single transaction.
 			$this->em->flush();
 		}
+		catch ( ExceptionInterface $e )
+		{
+			$this->discardChanges($updated);
+			return $this->invalidPayloadResponse($e);
+		}
 		catch ( Throwable $e )
 		{
 			$this->discardChanges($updated);
@@ -709,6 +724,23 @@ class ApiController extends AbstractController
 	protected function tooManyItemsResponse(int $maxItems): JsonResponse
 	{
 		return $this->errorResponse("Too many items (maximum: $maxItems)", Response::HTTP_REQUEST_ENTITY_TOO_LARGE, null, 'api.errors.tooManyItems');
+	}
+
+
+
+	/**
+	 * Returns a 400 response for a request body the serializer couldn't turn into
+	 * the entity: malformed JSON, or values of the wrong type/shape. These are client
+	 * errors, so they must not be reported as a failed save (500).
+	 */
+	private function invalidPayloadResponse(ExceptionInterface $e): JsonResponse
+	{
+		if ( $e instanceof NotEncodableValueException )
+		{
+			return $this->errorResponse('Invalid JSON data', Response::HTTP_BAD_REQUEST, $e, 'api.errors.invalidJson');
+		}
+
+		return $this->errorResponse('Invalid request data: ' . $e->getMessage(), Response::HTTP_BAD_REQUEST, $e, 'api.errors.invalidBody');
 	}
 
 
