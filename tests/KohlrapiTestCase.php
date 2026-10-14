@@ -40,6 +40,8 @@ abstract class KohlrapiTestCase extends TestCase
 {
 	protected EntityManagerInterface $em;
 
+	protected AbstractManagerRegistry $registry;
+
 	/** Log records written by the controllers: [level, message, context]. */
 	protected array $logs = [];
 
@@ -74,9 +76,10 @@ abstract class KohlrapiTestCase extends TestCase
 			}
 		});
 
-		$connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true], $config);
-		$this->em   = new EntityManager($connection, $config);
-		$registry   = $this->registryFor($this->em);
+		$connection     = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true], $config);
+		$this->em       = new EntityManager($connection, $config);
+		$registry       = $this->registryFor($this->em);
+		$this->registry = $registry;
 
 		(new SchemaTool($this->em))->createSchema($this->em->getMetadataFactory()->getAllMetadata());
 	}

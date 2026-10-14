@@ -162,6 +162,12 @@ Subclasses **may** override:
 | `applyCustomSort()` | Handle aggregate or JOIN-based sort cases; return `true` if handled |
 | `getDefaultSort()` | Fallback sort field and direction (default: `id DESC`) |
 | `getMaxLimit()` | Per-entity result cap; return `null` for no cap |
+| `getMaxOffset()` | Largest pagination offset (default `100000`) |
+| `getMaxTermLength()` | Longest global search term in characters (default `255`) |
+| `getMaxConstraints()` | Most filter constraints per request, across all fields (default `50`) |
+| `getMaxInValues()` | Most values in one `in` constraint (default `1000`) |
+
+A request exceeding one of the last four limits throws `ApiInvalidSearchException`, which `handleSearch()` answers with `400` (`api.errors.invalidSearch`). Return `null` from a limit to disable it. The limits also apply to `getEntityList()` / `getRandomEntityList()` — catch the exception there if you call them yourself.
 
 #### Filter payload (PrimeVue format)
 
@@ -225,7 +231,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `handleUpdate($classname, $request, $authLevel)` | Deserialize, validate + update an existing entity by UUID. Returns `400` if the body is malformed and `422` with violations if the result is invalid; the rejected changes are discarded. |
 | `handleBulk($classname, $request, $authLevel, $maxItems = 1000)` | Create or update multiple entities, all-or-nothing; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). Every item is validated; see [Bulk endpoints](#bulk-endpoints--recommended-route-convention). |
 | `handleBulkDelete($classname, $request, $authLevel, $maxItems = 1000)` | Delete multiple entities by UUID, all-or-nothing. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request (`bulkDelete`, no subject) and again per entity (`delete` with the entity as subject). |
-| `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON. |
+| `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON (`api.errors.invalidJson`) or a rejected search (`api.errors.invalidSearch`, see [`ApiRepository`](#apirepository)). |
 | `getEntity($classname, $uuid, $authLevel)` | Fetch a single entity object (no serialization) |
 | `getEntityList($repository, $searchParams, $authLevel)` | Fetch a list of entity objects (no serialization) |
 | `getRandomEntityList($repository, $searchParams, $authLevel)` | Fetch a random list of entity objects (no serialization). Portable across databases: the matching ids are sampled in PHP, so no custom `RAND()` DQL function is needed. |

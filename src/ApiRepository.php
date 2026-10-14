@@ -18,6 +18,8 @@
  *   - applyCustomSort()     — handle aggregate or JOIN-based sort cases
  *   - getDefaultSort()      — change the fallback sort field and order
  *   - getMaxLimit()         — enforce a per-entity result cap
+ *   - getMaxOffset(), getMaxTermLength(), getMaxConstraints(), getMaxInValues()
+ *                           — request size limits (exceeding one throws ApiInvalidSearchException)
  *
  * Expected filter payload (PrimeVue format):
  * {
@@ -114,6 +116,40 @@ abstract class ApiRepository extends ServiceEntityRepository
 		return null;
 	}
 
+	/**
+	 * Largest pagination offset accepted; null for no limit. Deep offsets make the
+	 * database scan and discard every row before them.
+	 */
+	protected function getMaxOffset(): ?int
+	{
+		return 100_000;
+	}
+
+	/**
+	 * Longest global search term accepted, in characters; null for no limit.
+	 */
+	protected function getMaxTermLength(): ?int
+	{
+		return 255;
+	}
+
+	/**
+	 * Most filter constraints accepted per request, across all fields; null for no limit.
+	 */
+	protected function getMaxConstraints(): ?int
+	{
+		return 50;
+	}
+
+	/**
+	 * Most values accepted in one 'in' constraint; null for no limit. Each value is
+	 * bound as its own query parameter, and databases cap their number.
+	 */
+	protected function getMaxInValues(): ?int
+	{
+		return 1000;
+	}
+
 
 
 	/**
@@ -123,10 +159,19 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * @param int $offset The starting position of the results to retrieve.
 	 * @param int $limit The maximum number of results to retrieve.
 	 * @param array<string, mixed>|null $sort An optional array defining the sorting criteria.
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
 	 * @return array{items: T[], count: int} Returns an associative array containing the paginated results under the 'items' key and the total count under the 'count' key.
 	 */
 	public function search(string $term, array $filters, int $offset, int $limit, ?array $sort): array
 	{
+		$maxOffset = $this->getMaxOffset();
+		if ( $maxOffset !== null && $offset > $maxOffset )
+		{
+			throw new ApiInvalidSearchException("Offset exceeds the maximum of $maxOffset");
+		}
+
+		$this->checkTerm($term);
+
 		$maxLimit = $this->getMaxLimit();
 		if ( $maxLimit !== null )
 		{
@@ -174,9 +219,12 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * @param array<mixed> $filters Filter payload (same format as search()).
 	 * @param int $limit Maximum number of results to return.
 	 * @return array{items: T[], count: int}
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
 	 */
 	public function searchRandom(string $term, array $filters, int $limit): array
 	{
+		$this->checkTerm($term);
+
 		$maxLimit = $this->getMaxLimit();
 		if ( $maxLimit !== null )
 		{
@@ -296,6 +344,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 *                              - 'operator' (string): Logical operator to combine constraints
 	 *                                ('and', 'or'). Defaults to 'and'.
 	 * @return void
+	 * @throws ApiInvalidSearchException If the filters exceed getMaxConstraints() or getMaxInValues().
 	 */
 	protected function applyFilters(QueryBuilder $qb, array $filters): void
 	{
@@ -345,6 +394,14 @@ abstract class ApiRepository extends ServiceEntityRepository
 						continue;
 					}
 
+					$maxIn = $this->getMaxInValues();
+					if ( $maxIn !== null && count($value) > $maxIn )
+					{
+						throw new ApiInvalidSearchException("An 'in' filter accepts at most $maxIn values");
+					}
+
+					$this->checkConstraintCount($paramIndex + 1);
+
 					$paramIndex++;
 					$expressions[] = $qb->expr()->in($column, ":$param");
 					$qb->setParameter($param, array_values($value));
@@ -356,6 +413,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 					continue;
 				}
 
+				$this->checkConstraintCount($paramIndex + 1);
 				$paramIndex++;
 
 				switch ( $matchMode )
@@ -430,6 +488,34 @@ abstract class ApiRepository extends ServiceEntityRepository
 			{
 				$qb->andWhere($qb->expr()->andX(...$expressions));
 			}
+		}
+	}
+
+
+
+	/**
+	 * @throws ApiInvalidSearchException If the term exceeds getMaxTermLength().
+	 */
+	private function checkTerm(string $term): void
+	{
+		$maxLength = $this->getMaxTermLength();
+		if ( $maxLength !== null && mb_strlen($term) > $maxLength )
+		{
+			throw new ApiInvalidSearchException("The search term exceeds the maximum length of $maxLength characters");
+		}
+	}
+
+
+
+	/**
+	 * @throws ApiInvalidSearchException If $count exceeds getMaxConstraints().
+	 */
+	private function checkConstraintCount(int $count): void
+	{
+		$max = $this->getMaxConstraints();
+		if ( $max !== null && $count > $max )
+		{
+			throw new ApiInvalidSearchException("A search accepts at most $max filter constraints");
 		}
 	}
 

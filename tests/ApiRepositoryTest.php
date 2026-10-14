@@ -2,6 +2,7 @@
 
 namespace pmaerksch\Kohlrapi\Tests;
 
+use pmaerksch\Kohlrapi\ApiInvalidSearchException;
 use pmaerksch\Kohlrapi\ApiSearchParams;
 use pmaerksch\Kohlrapi\Tests\Fixtures\Item;
 use pmaerksch\Kohlrapi\Tests\Fixtures\ItemRepository;
@@ -185,6 +186,71 @@ class ApiRepositoryTest extends KohlrapiTestCase
 		{
 			$this->assertSame(400, $this->controller()->handleSearch(Item::class, $this->request($body))->getStatusCode(), $body);
 		}
+	}
+
+
+
+	public static function oversizedRequests(): array
+	{
+		$constraints = array_fill(0, 51, ['value' => 'a', 'matchMode' => 'contains']);
+
+		return [
+			'offset'      => [['offset' => 100_001]],
+			'term'        => [['term' => str_repeat('ä', 256)]],
+			'constraints' => [['filters' => ['name' => ['constraints' => $constraints]]]],
+			'spread'      => [['filters' => ['name' => ['constraints' => array_slice($constraints, 0, 30)], 'owner' => ['constraints' => array_slice($constraints, 0, 21)]]]],
+			'in values'   => [['filters' => ['name' => self::filter('in', array_map('strval', range(1, 1001)))]]],
+		];
+	}
+
+
+
+	#[DataProvider('oversizedRequests')]
+	public function testOversizedSearchIs400(array $body): void
+	{
+		$response = $this->controller()->handleSearch(Item::class, $this->request(json_encode($body)));
+
+		$this->assertSame(400, $response->getStatusCode());
+		$this->assertSame('api.errors.invalidSearch', $this->body($response)['key']);
+	}
+
+
+
+	public function testLimitsAcceptRequestsAtTheBoundary(): void
+	{
+		$constraints = array_fill(0, 50, ['value' => 'a', 'matchMode' => 'contains']);
+		$body        = ['offset' => 100_000, 'term' => str_repeat('ä', 255), 'filters' => ['name' => ['operator' => 'or', 'constraints' => $constraints]]];
+
+		$this->assertSame(200, $this->controller()->handleSearch(Item::class, $this->request(json_encode($body)))->getStatusCode());
+		$this->assertSame([], $this->repo->search('', ['name' => self::filter('in', array_map('strval', range(1, 1000)))], 0, 10, null)['items']);
+	}
+
+
+
+	public function testSearchRandomChecksTerm(): void
+	{
+		$this->expectException(ApiInvalidSearchException::class);
+		$this->repo->searchRandom(str_repeat('x', 256), [], 1);
+	}
+
+
+
+	public function testLimitsCanBeDisabled(): void
+	{
+		$repo = new class($this->registry, Item::class) extends ItemRepository
+		{
+			protected function getMaxOffset(): ?int
+			{
+				return null;
+			}
+
+			protected function getMaxTermLength(): ?int
+			{
+				return null;
+			}
+		};
+
+		$this->assertSame([], $repo->search(str_repeat('x', 300), [], 200_000, 10, null)['items']);
 	}
 
 

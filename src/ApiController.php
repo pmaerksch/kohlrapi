@@ -388,6 +388,10 @@ class ApiController extends AbstractController
 		{
 			return $this->accessDeniedResponse();
 		}
+		catch ( ApiInvalidSearchException $e )
+		{
+			return $this->errorResponse($e->getMessage(), Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidSearch');
+		}
 
 		// `count` is the number of items in this page; `maxCount` is the total number of
 		// results matching the search term/filters (ignoring only the pagination limit).
@@ -1080,6 +1084,7 @@ class ApiController extends AbstractController
 	 * @param ApiSearchParams $searchParams Parameters for search, including term, filters, offset, limit, and sorting options.
 	 * @param string $authLevel Required authorization level for access. Defaults to 'ROLE_ADMIN'.
 	 * @return array{items: object[], count: int} The list of items and the total count.
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
 	 * @throws Exception If the user does not have the required access level.
 	 */
 	protected function getEntityList(ApiRepository $repository, ApiSearchParams $searchParams, string $authLevel = 'ROLE_ADMIN'): array
@@ -1108,6 +1113,7 @@ class ApiController extends AbstractController
 	 * @param ApiSearchParams $searchParams Object containing search criteria such as term, filters, and limit.
 	 * @param string $authLevel Authorization level required to access this functionality. Defaults to 'ROLE_ADMIN'.
 	 * @return array{items: object[], count: int} The list of entities ('items') and their number ('count').
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
 	 * @throws Exception If the current user does not have the required authorization level.
 	 */
 	protected function getRandomEntityList(ApiRepository $repository, ApiSearchParams $searchParams, string $authLevel = 'ROLE_ADMIN'): array
