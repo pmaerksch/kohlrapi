@@ -22,6 +22,7 @@
 
 namespace pmaerksch\Kohlrapi;
 
+use Doctrine\DBAL\Exception\DriverException;
 use InvalidArgumentException;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Doctrine\ORM\EntityManagerInterface;
@@ -464,7 +465,7 @@ class ApiController extends AbstractController
 	{
 		// Loaded before the auth check so the entity is available as the
 		// authorization subject (for resource-level decisions).
-		$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $request->attributes->get('uuid')]);
+		$entity = $this->findOneByUuid($classname, $request->attributes->get('uuid'));
 
 		if ( !$this->can($authLevel, $entity, $classname, 'update') )
 		{
@@ -565,7 +566,7 @@ class ApiController extends AbstractController
 
 				if ( $uuid )
 				{
-					$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+					$entity = $this->findOneByUuid($classname, $uuid);
 
 					if ( $entity === null )
 					{
@@ -665,7 +666,7 @@ class ApiController extends AbstractController
 
 		foreach ( $uuids as $uuid )
 		{
-			$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+			$entity = $this->findOneByUuid($classname, $uuid);
 
 			if ( $entity === null )
 			{
@@ -746,12 +747,39 @@ class ApiController extends AbstractController
 	 */
 	protected function resolveByUuid(string $classname, ?string $uuid): ?object
 	{
+		return $this->findOneByUuid($classname, $uuid);
+	}
+
+
+
+	/**
+	 * Looks up an entity by UUID; null if the UUID is null or no entity matches.
+	 *
+	 * A UUID the database can't parse counts as "not found": on PostgreSQL the uuid
+	 * column type rejects a malformed value (SQLSTATE 22P02) instead of simply not
+	 * matching it, which would otherwise surface as a 500. Other databases compare
+	 * it as a string and return no row anyway, so behaviour is the same everywhere.
+	 */
+	private function findOneByUuid(string $classname, ?string $uuid): ?object
+	{
 		if ( $uuid === null )
 		{
 			return null;
 		}
 
-		return $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+		try
+		{
+			return $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+		}
+		catch ( DriverException $e )
+		{
+			if ( $e->getSQLState() === '22P02' )
+			{
+				return null;
+			}
+
+			throw $e;
+		}
 	}
 
 
@@ -814,7 +842,7 @@ class ApiController extends AbstractController
 	{
 		// Loaded before the auth check so the entity is available as the
 		// authorization subject (for resource-level decisions).
-		$entity = $this->em->getRepository($classname)->findOneBy(['uuid' => $uuid]);
+		$entity = $this->findOneByUuid($classname, $uuid);
 
 		if ( !$this->can($authLevel, $entity, $classname, 'fetch') )
 		{
