@@ -40,6 +40,7 @@ namespace pmaerksch\Kohlrapi;
 
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\ORM\AbstractQuery;
 use Doctrine\ORM\QueryBuilder;
 use Doctrine\ORM\Tools\Pagination\Paginator;
 
@@ -208,9 +209,11 @@ abstract class ApiRepository extends ServiceEntityRepository
 	/**
 	 * Returns a random subset of results matching the given term and filters.
 	 *
-	 * DQL has no portable RAND(), so the matching ids are fetched (cheap: a single
-	 * integer column), sampled in PHP, and the chosen entities loaded with one IN query.
-	 * Works on every database Doctrine supports, without a custom DQL function.
+	 * DQL has no portable RAND(), so the matching ids are streamed (a single integer
+	 * column), sampled in PHP while they arrive, and the chosen entities loaded with one
+	 * IN query. Works on every database Doctrine supports, without a custom DQL function.
+	 * PHP holds only $limit ids at a time, however many rows match; the database still
+	 * sends every matching id, so very large unfiltered tables remain a full scan.
 	 *
 	 * @param string $term Global search term.
 	 * @param array<mixed> $filters Filter payload (same format as search()).
@@ -240,19 +243,18 @@ abstract class ApiRepository extends ServiceEntityRepository
 		$this->applyGlobalSearch($qb, $term);
 		$this->applyFilters($qb, $filters);
 
-		$ids = $this->rejectInvalidInput(fn() => $qb
-			->select("DISTINCT {$alias}.id")
+		$query = $qb
+			->select("DISTINCT {$alias}.id AS kohlrapi_id")
 			->resetDQLPart('orderBy')
-			->getQuery()
-			->getSingleColumnResult());
+			->getQuery();
+
+		// toIterable() runs the query immediately, so it belongs inside the error mapping.
+		$ids = $this->rejectInvalidInput(fn() => $this->sample($query->toIterable([], AbstractQuery::HYDRATE_SCALAR), $limit));
 
 		if ( count($ids) === 0 )
 		{
 			return ['items' => [], 'count' => 0];
 		}
-
-		shuffle($ids);
-		$ids = array_slice($ids, 0, $limit);
 
 		$items = $this->createQueryBuilder($alias)
 			->where("{$alias}.id IN (:ids)")
@@ -488,6 +490,41 @@ abstract class ApiRepository extends ServiceEntityRepository
 				$qb->andWhere($qb->expr()->andX(...$expressions));
 			}
 		}
+	}
+
+
+
+	/**
+	 * Reservoir sampling (Algorithm R): a uniformly random sample of $size ids from a
+	 * stream of rows in one pass, keeping only $size ids in memory.
+	 *
+	 * @param iterable<array{kohlrapi_id: int|string}> $rows
+	 * @return array<int, int|string>
+	 */
+	private function sample(iterable $rows, int $size): array
+	{
+		$sample = [];
+		$seen   = 0;
+
+		foreach ( $rows as $row )
+		{
+			$seen++;
+
+			if ( $seen <= $size )
+			{
+				$sample[] = $row['kohlrapi_id'];
+				continue;
+			}
+
+			$slot = random_int(0, $seen - 1);
+
+			if ( $slot < $size )
+			{
+				$sample[ $slot ] = $row['kohlrapi_id'];
+			}
+		}
+
+		return $sample;
 	}
 
 

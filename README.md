@@ -236,7 +236,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON (`api.errors.invalidJson`) or a rejected search (`api.errors.invalidSearch`, see [`ApiRepository`](#apirepository)). |
 | `getEntity($classname, $uuid, $authLevel)` | Fetch a single entity object (no serialization) |
 | `getEntityList($repository, $searchParams, $authLevel)` | Fetch a list of entity objects (no serialization) |
-| `getRandomEntityList($repository, $searchParams, $authLevel)` | Fetch a random list of entity objects (no serialization). Portable across databases: the matching ids are sampled in PHP, so no custom `RAND()` DQL function is needed. |
+| `getRandomEntityList($repository, $searchParams, $authLevel)` | Fetch a random list of entity objects (no serialization). Portable across databases: the matching ids are streamed and sampled in PHP (reservoir sampling, uniform), so no custom `RAND()` DQL function is needed and PHP holds only `limit` ids at a time. The database still sends every matching id, so keep random searches filtered on very large tables. |
 
 **Utility:**
 

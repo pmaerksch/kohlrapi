@@ -162,6 +162,41 @@ class ApiRepositoryTest extends KohlrapiTestCase
 
 
 
+	public function testSearchRandomSamplesEveryMatchEventually(): void
+	{
+		for ( $i = 0; $i < 45; $i++ )
+		{
+			$this->createItem("extra$i", 'carol');
+		}
+
+		$seen = [];
+
+		// P(an item is never picked in 200 draws of 5 out of 50) = 0.9^200 ≈ 7e-10
+		for ( $run = 0; $run < 200; $run++ )
+		{
+			foreach ( $this->repo->searchRandom('', [], 5)['items'] as $item )
+			{
+				$seen[ $item->getName() ] = true;
+			}
+		}
+
+		$this->assertCount(50, $seen);
+	}
+
+
+
+	public function testSearchRandomWithGroupedBaseConditions(): void
+	{
+		$this->repo->baseConditions = fn($qb) => $qb->groupBy('i.id')->having('MAX(i.qty) >= 4');
+
+		$names = array_map(fn(Item $i) => $i->getName(), $this->repo->searchRandom('', [], 10)['items']);
+		sort($names);
+
+		$this->assertSame(['50% off', 'a_b'], $names);
+	}
+
+
+
 	public function testSearchRandomWithLimitAboveMatches(): void
 	{
 		$this->assertCount(5, $this->repo->searchRandom('', [], 50)['items']);
