@@ -340,6 +340,20 @@ class WriteHandlersTest extends KohlrapiTestCase
 
 
 
+	public function testBulkDeleteOperations(): void
+	{
+		$a          = $this->createItem('a');
+		$controller = $this->controller();
+		$controller->handleBulkDelete(Item::class, $this->request(json_encode([$a->getUuid()])));
+
+		$this->assertSame('bulkDelete', $controller->authCalls[0]->operation);
+		$this->assertNull($controller->authCalls[0]->subject);
+		$this->assertSame('delete', $controller->authCalls[1]->operation);
+		$this->assertSame($a->getUuid(), $controller->authCalls[1]->subject?->getUuid());
+	}
+
+
+
 	public function testBulkDeleteAuthorizesEachEntity(): void
 	{
 		$a                      = $this->createItem('a');

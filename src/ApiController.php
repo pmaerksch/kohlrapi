@@ -695,15 +695,16 @@ class ApiController extends AbstractController
 	/**
 	 * Handles bulk deletion of entities by UUID, all-or-nothing.
 	 *
-	 * Authorization runs once for the whole request, then once per entity with the
-	 * loaded entity as subject — so resource-level rules in isAuthorized() also apply.
+	 * Authorization runs once for the whole request (operation 'bulkDelete', no subject),
+	 * then once per entity ('delete' with the loaded entity as subject) — so resource-level
+	 * rules in isAuthorized() also apply. 'delete' therefore always comes with a subject.
 	 *
 	 * @param int|null $maxItems Maximum number of UUIDs per request (413 if exceeded); null for no limit.
 	 * @param class-string $classname
 	 */
 	protected function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): Response
 	{
-		if ( !$this->can($authLevel, null, $classname, 'delete') )
+		if ( !$this->can($authLevel, null, $classname, 'bulkDelete') )
 		{
 			return $this->accessDeniedResponse();
 		}
@@ -997,7 +998,7 @@ class ApiController extends AbstractController
 	 * @param string $action Permission token (a role for the default implementation).
 	 * @param object|null $subject The entity the action concerns, when loaded.
 	 * @param string|null $subjectClass FQCN of the entity the action concerns, when known.
-	 * @param string|null $operation The CRUD operation ('search'|'fetch'|'create'|'update'|'bulk'|'delete').
+	 * @param string|null $operation The CRUD operation ('search'|'fetch'|'create'|'update'|'bulk'|'bulkDelete'|'delete', or 'create.after'|'update.after').
 	 */
 	protected function can(string $action, ?object $subject = null, ?string $subjectClass = null, ?string $operation = null): bool
 	{
