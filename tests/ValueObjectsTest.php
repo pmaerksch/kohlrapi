@@ -116,6 +116,20 @@ class ValueObjectsTest extends KohlrapiTestCase
 
 
 
+	public function testClientErrorsAreLoggedAsInfoServerErrorsAsError(): void
+	{
+		$controller = $this->controller();
+		$controller->handleCreate(Item::class, $this->request('{bad'));
+		(fn() => $this->errorResponse('boom', 500, new \RuntimeException('boom'), 'k'))->call($controller);
+
+		$this->assertSame('info', $this->logs[0][0]);
+		$this->assertSame(400, $this->logs[0][2]['status']);
+		$this->assertSame('error', $this->logs[1][0]);
+		$this->assertInstanceOf(\RuntimeException::class, $this->logs[1][2]['exception']);
+	}
+
+
+
 	public function testDeniedIs403ForAuthenticatedUsers(): void
 	{
 		$controller             = $this->controller(null, new TestUser());

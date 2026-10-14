@@ -29,6 +29,7 @@ use Symfony\Component\HttpKernel\KernelInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
 use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -81,7 +82,11 @@ class ApiController extends AbstractController
 	 */
 	protected function errorResponse(string $message, int $status, ?Throwable $e = null, string $key = '', array $details = []): JsonResponse
 	{
-		$this->logger->error($message, $e ? ['exception' => $e] : ['status' => $status]);
+		// Server errors are worth an alert; client errors (bad input, 401/403/404) are
+		// routine and only logged for tracing, so they don't drown out real failures.
+		$context = $e ? ['status' => $status, 'exception' => $e] : ['status' => $status];
+		$level   = $status >= 500 ? LogLevel::ERROR : LogLevel::INFO;
+		$this->logger->log($level, $message, $context);
 
 		// The detailed message may carry internals (exception text, SQL, paths).
 		// Only expose it to users explicitly allowed to see error details; everyone

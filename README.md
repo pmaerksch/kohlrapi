@@ -138,7 +138,7 @@ interface ErrorDetailAware
 }
 ```
 
-`errorResponse()` always logs the full message server-side and returns a stable `key` the client can localise. The human-readable `error` detail — which may carry internals (exception text, SQL, file paths) — is included in the response **only** when the authenticated user implements this interface and returns `true`; otherwise `error` is `null`. This keeps sensitive detail out of normal responses while letting privileged users (e.g. developers) see it.
+`errorResponse()` always logs the full message server-side (`error` level for `5xx`, `info` for client errors) and returns a stable `key` the client can localise. The human-readable `error` detail — which may carry internals (exception text, SQL, file paths) — is included in the response **only** when the authenticated user implements this interface and returns `true`; otherwise `error` is `null`. This keeps sensitive detail out of normal responses while letting privileged users (e.g. developers) see it.
 
 ---
 
