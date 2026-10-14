@@ -291,6 +291,15 @@ abstract class BaseController extends ApiController
 
 Routing every check through `can()` keeps authorization to a single chokepoint that your `isAuthorized()` override fully controls.
 
+**Checking the result of a write:** by default an update is authorized against the entity *before* the payload is applied, so a payload could e.g. move the entity to an owner or tenant the user has no rights on. Override `reauthorizesWrites()` to return `true` and every create/update (including bulk items) is checked again after the payload has been applied and before anything is written — with operation `create.after` / `update.after` and the resulting entity as `$subject`. A denial discards the changes and returns `401`/`403`.
+
+```php
+protected function reauthorizesWrites(): bool
+{
+    return true;
+}
+```
+
 ##### `AuthorizationContext`
 
 Immutable bundle passed to `isAuthorized()`. Built by `can()` — you never construct it yourself; overrides only read the fields they need. New fields may be added in future versions without breaking your override.
@@ -300,7 +309,7 @@ Immutable bundle passed to `isAuthorized()`. Built by `can()` — you never cons
 | `$action` | `string` | The requested permission token (a role for the default impl) |
 | `$subjectClass` | `?string` | FQCN of the entity the action concerns, when known (set even with no instance, e.g. create/search) |
 | `$subject` | `?object` | The loaded entity the action concerns (fetch/update); `null` otherwise |
-| `$operation` | `?string` | `'search' \| 'fetch' \| 'create' \| 'update' \| 'bulk' \| 'delete'` |
+| `$operation` | `?string` | `'search' \| 'fetch' \| 'create' \| 'update' \| 'bulk' \| 'delete'`, plus `'create.after' \| 'update.after'` with `reauthorizesWrites()` |
 | `$user` | `?object` | The authenticated user, or `null` |
 | `$request` | `?Request` | The current HTTP request, when available |
 

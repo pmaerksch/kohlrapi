@@ -434,7 +434,13 @@ class ApiController extends AbstractController
 
 		try
 		{
-			$entity     = $this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'create'));
+			$entity = $this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'create'));
+
+			if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, 'create.after') )
+			{
+				return $this->accessDeniedResponse();
+			}
+
 			$violations = $this->collectViolations($entity);
 
 			if ( count($violations) > 0 )
@@ -493,6 +499,12 @@ class ApiController extends AbstractController
 		try
 		{
 			$this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
+
+			if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, 'update.after') )
+			{
+				$this->discardChanges([$entity]);
+				return $this->accessDeniedResponse();
+			}
 
 			$violations = $this->collectViolations($entity);
 
@@ -593,6 +605,7 @@ class ApiController extends AbstractController
 					$updated[] = $entity;
 
 					$this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
+					$operation = 'update.after';
 				}
 				else
 				{
@@ -605,6 +618,13 @@ class ApiController extends AbstractController
 					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'create'));
 
 					$created[] = $entity;
+					$operation = 'create.after';
+				}
+
+				if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, $operation) )
+				{
+					$this->discardChanges($updated);
+					return $this->accessDeniedResponse();
 				}
 
 				$uuids[]    = $entity->getUuid();
@@ -881,6 +901,23 @@ class ApiController extends AbstractController
 	protected function isAuthorized(AuthorizationContext $context): bool
 	{
 		return $this->isGranted($context->action, $context->subject);
+	}
+
+
+
+	/**
+	 * Return true to authorize every write a second time, after the payload has been
+	 * applied and before anything is flushed: with operation 'create.after' or
+	 * 'update.after' and the resulting entity as subject. Without it, an update is only
+	 * checked against the entity's state *before* the change — so a payload could move
+	 * an entity to another owner or tenant that the user has no rights on.
+	 *
+	 * Off by default for backwards compatibility: with it on, the default isAuthorized()
+	 * calls isGranted() a second time, and voters/overrides must handle the new operations.
+	 */
+	protected function reauthorizesWrites(): bool
+	{
+		return false;
 	}
 
 
