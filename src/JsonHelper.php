@@ -11,6 +11,7 @@ use InvalidArgumentException;
 class JsonHelper
 {
 
+	/** @var array<mixed> */
 	private array $data;
 
 

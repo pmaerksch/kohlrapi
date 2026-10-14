@@ -12,5 +12,8 @@ namespace pmaerksch\Kohlrapi;
  */
 interface ArraySerializable
 {
+	/**
+	 * @return array<string, mixed>
+	 */
 	public function getDataAsArray(): array;
 }

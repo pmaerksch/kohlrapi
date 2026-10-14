@@ -38,6 +38,11 @@ namespace pmaerksch\Kohlrapi;
 
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\ORM\QueryBuilder;
+
+/**
+ * @template T of object
+ * @extends ServiceEntityRepository<T>
+ */
 abstract class ApiRepository extends ServiceEntityRepository
 {
 	/**
@@ -49,11 +54,13 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * Maps frontend field keys (filter keys and sort fields) to DQL column expressions.
 	 * Example: ['name' => 'c.name', 'address.country' => 'c.country']
 	 * Do not include 'id' or 'uuid' — those are added automatically.
+	 * @return array<string, string>
 	 */
 	abstract protected function getEntityFieldMap(): array;
 
 	/**
 	 * Returns the full field map, including the base fields (id, uuid) from ApiEntity.
+	 * @return array<string, string>
 	 */
 	final protected function getFieldMap(): array
 	{
@@ -74,6 +81,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	/**
 	 * Default sort applied when no valid sort is provided.
 	 * Override to change the per-entity default.
+	 * @return array{field: string, order: string}
 	 */
 	protected function getDefaultSort(): array
 	{
@@ -83,6 +91,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	/**
 	 * Handle special sort cases (e.g. aggregate sorts requiring a JOIN).
 	 * Return true if the sort was handled, false to fall through to the generic logic.
+	 * @param array<string, mixed> $sort
 	 */
 	protected function applyCustomSort(QueryBuilder $qb, array $sort): bool
 	{
@@ -110,11 +119,11 @@ abstract class ApiRepository extends ServiceEntityRepository
 	/**
 	 * Executes a search query with the specified parameters to retrieve a set of paginated results and their total count.
 	 * @param string $term The search term to apply to the query.
-	 * @param array $filters An array of filters to apply to the query.
+	 * @param array<mixed> $filters An array of filters to apply to the query.
 	 * @param int $offset The starting position of the results to retrieve.
 	 * @param int $limit The maximum number of results to retrieve.
-	 * @param ?array $sort An optional array defining the sorting criteria.
-	 * @return array Returns an associative array containing the paginated results under the 'items' key and the total count under the 'count' key.
+	 * @param array<string, mixed>|null $sort An optional array defining the sorting criteria.
+	 * @return array{items: T[], count: int} Returns an associative array containing the paginated results under the 'items' key and the total count under the 'count' key.
 	 */
 	public function search(string $term, array $filters, int $offset, int $limit, ?array $sort): array
 	{
@@ -162,9 +171,9 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * Works on every database Doctrine supports, without a custom DQL function.
 	 *
 	 * @param string $term Global search term.
-	 * @param array $filters Filter payload (same format as search()).
+	 * @param array<mixed> $filters Filter payload (same format as search()).
 	 * @param int $limit Maximum number of results to return.
-	 * @return array { items, count }
+	 * @return array{items: T[], count: int}
 	 */
 	public function searchRandom(string $term, array $filters, int $limit): array
 	{
@@ -236,7 +245,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * - A default sort field and order is retrieved using the `getDefaultSort()` method.
 	 * - Custom sorting cases are handled by overriding `applyCustomSort()` in subclasses.
 	 * @param QueryBuilder $qb The query builder instance to which sorting will be applied.
-	 * @param array|null $sort An optional array containing sorting criteria.
+	 * @param array<string, mixed>|null $sort An optional array containing sorting criteria.
 	 *                           Expected keys are 'field' (string) and 'order' (string, 'ASC' or 'DESC').
 	 * @return void
 	 */
@@ -275,7 +284,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	/**
 	 * Applies a set of filters to a QueryBuilder instance.
 	 * @param QueryBuilder $qb Instance of QueryBuilder to modify with the specified filters.
-	 * @param array $filters Associative array of filter configurations.
+	 * @param array<mixed> $filters Associative array of filter configurations.
 	 *                              Each filter should have a key that maps to a database column
 	 *                              and a configuration array with the following optional keys:
 	 *                              - 'constraints' (array): A list of filtering constraints, where
@@ -326,17 +335,28 @@ abstract class ApiRepository extends ServiceEntityRepository
 					continue;
 				}
 
-				// Only 'in' takes a list; every other mode compares against a single scalar.
-				$isValid = $matchMode === 'in'
-					? is_array($value) && count($value) > 0 && count(array_filter($value, 'is_scalar')) === count($value)
-					: is_scalar($value);
+				$param = 'fp_' . $paramIndex;
 
-				if ( !$isValid )
+				// Only 'in' takes a list; every other mode compares against a single scalar.
+				if ( $matchMode === 'in' )
+				{
+					if ( !is_array($value) || count($value) === 0 || count(array_filter($value, 'is_scalar')) !== count($value) )
+					{
+						continue;
+					}
+
+					$paramIndex++;
+					$expressions[] = $qb->expr()->in($column, ":$param");
+					$qb->setParameter($param, array_values($value));
+					continue;
+				}
+
+				if ( !is_scalar($value) )
 				{
 					continue;
 				}
 
-				$param = 'fp_' . $paramIndex++;
+				$paramIndex++;
 
 				switch ( $matchMode )
 				{
@@ -383,11 +403,6 @@ abstract class ApiRepository extends ServiceEntityRepository
 					case 'gte':
 						$expressions[] = $qb->expr()->gte($column, ":$param");
 						$qb->setParameter($param, $value);
-						break;
-
-					case 'in':
-						$expressions[] = $qb->expr()->in($column, ":$param");
-						$qb->setParameter($param, array_values($value));
 						break;
 
 					case 'contains':

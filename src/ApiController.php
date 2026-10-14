@@ -38,6 +38,7 @@ use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Serializer\Exception\ExceptionInterface;
 use Symfony\Component\Serializer\Exception\NotEncodableValueException;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
+use Symfony\Component\Serializer\Normalizer\NormalizerInterface;
 use Symfony\Component\Serializer\SerializerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 use Throwable;
@@ -93,7 +94,7 @@ class ApiController extends AbstractController
 
 	/**
 	 * Returns a successful JSON response with a default message and additional data.
-	 * @param array $data Optional associative array of additional data to include in the response.
+	 * @param array<string, mixed> $data Optional associative array of additional data to include in the response.
 	 * @return JsonResponse JSON response with a status code of HTTP 200 (OK).
 	 */
 	protected function successResponse(array $data = []): JsonResponse
@@ -107,8 +108,8 @@ class ApiController extends AbstractController
 	 * Returns a standardized list response.
 	 * Each item in $items may be an entity object or an already-serialized array (used as-is). Objects implementing
 	 * {@see ArraySerializable} are serialized via getDataAsArray(); other objects via the serializer + $serializerGroups.
-	 * @param array $items Entity objects or pre-serialized arrays.
-	 * @param array $serializerGroups Serializer groups applied to non-ArraySerializable entity objects. 'uuid' is always included.
+	 * @param array<mixed> $items Entity objects or pre-serialized arrays.
+	 * @param string[] $serializerGroups Serializer groups applied to non-ArraySerializable entity objects. 'uuid' is always included.
 	 * @param int|null $count Number of items in this result set (for pagination).
 	 * @param int|null $maxCount Total number of possible results regardless of limit (for pagination).
 	 * @return JsonResponse { message, items, count?, maxCount? }
@@ -141,8 +142,8 @@ class ApiController extends AbstractController
 	 * Returns a standardized single-entity response.
 	 * $data may be an entity object or an already-serialized array (used as-is). An object implementing
 	 * {@see ArraySerializable} is serialized via getDataAsArray(); any other object via the serializer + $serializerGroups.
-	 * @param object|array $data Entity object or pre-serialized array.
-	 * @param array $serializerGroups Serializer groups applied to a non-ArraySerializable entity object. 'uuid' is always included.
+	 * @param object|array<string, mixed> $data Entity object or pre-serialized array.
+	 * @param string[] $serializerGroups Serializer groups applied to a non-ArraySerializable entity object. 'uuid' is always included.
 	 * @return JsonResponse { message, data }
 	 */
 	protected function singleResponse(object|array $data, array $serializerGroups = []): JsonResponse
@@ -157,7 +158,7 @@ class ApiController extends AbstractController
 	 * getDataAsArray(), any other object via the serializer (with $serializerGroups
 	 * plus the always-present 'uuid' group), and an array verbatim.
 	 * @param mixed $item Entity object or pre-serialized array.
-	 * @param array $serializerGroups Groups applied to non-ArraySerializable entity objects.
+	 * @param string[] $serializerGroups Groups applied to non-ArraySerializable entity objects.
 	 * @return mixed The serialized array (or the original scalar/array).
 	 */
 	private function resolvePayload(mixed $item, array $serializerGroups): mixed
@@ -169,7 +170,16 @@ class ApiController extends AbstractController
 
 		if ( is_object($item) )
 		{
-			return $this->serializer->normalize($item, 'json', ['groups' => array_merge($serializerGroups, ['uuid'])]);
+			$context = ['groups' => array_merge($serializerGroups, ['uuid'])];
+
+			// normalize() isn't part of SerializerInterface: use it when the serializer
+			// offers it (Symfony's does), otherwise round-trip through JSON.
+			if ( $this->serializer instanceof NormalizerInterface )
+			{
+				return $this->serializer->normalize($item, 'json', $context);
+			}
+
+			return json_decode($this->serializer->serialize($item, 'json', $context), true);
 		}
 
 		return $item;
@@ -179,7 +189,7 @@ class ApiController extends AbstractController
 
 	/**
 	 * Generates a JSON response with HTTP status code 201 (Created).
-	 * @param array $data Optional additional data to include in the response body.
+	 * @param array<string, mixed> $data Optional additional data to include in the response body.
 	 * @return JsonResponse JSON response containing a success message and optional data.
 	 */
 	protected function createdResponse(array $data = []): JsonResponse
@@ -266,6 +276,7 @@ class ApiController extends AbstractController
 	 * flat { "field": "message" } map (empty when valid).
 	 * @param object $input The DTO or entity to validate.
 	 * @param string $prefix Prepended to every field path, e.g. "3." to address item 3 of a bulk payload.
+	 * @return array<string, string> Field path => message.
 	 */
 	protected function collectViolations(object $input, string $prefix = ''): array
 	{
@@ -274,7 +285,7 @@ class ApiController extends AbstractController
 		foreach ( $this->validator->validate($input) as $violation )
 		{
 			$field                      = ltrim($violation->getPropertyPath(), '.');
-			$errors[ $prefix . $field ] = $violation->getMessage();
+			$errors[ $prefix . $field ] = (string)$violation->getMessage();
 		}
 
 		return $errors;
@@ -285,6 +296,7 @@ class ApiController extends AbstractController
 	/**
 	 * Returns a 422 Unprocessable Entity response with per-field violation messages.
 	 * Format: { "error": "Validation failed", "key": "...", "violations": { "field": "message" } }
+	 * @param array<string, string> $violations Field path => message.
 	 */
 	protected function validationErrorResponse(array $violations): JsonResponse
 	{
@@ -301,7 +313,7 @@ class ApiController extends AbstractController
 	 * The $filter callable receives the raw value and should return the processed value,
 	 * or null/false if the value is invalid (matching filter_var behaviour).
 	 * Throws ApiMissingFieldException if the field is absent or the filter rejects the value.
-	 * @param array $data Decoded JSON array.
+	 * @param array<string, mixed> $data Decoded JSON array.
 	 * @param string $key Field name to extract.
 	 * @param callable|null $filter Optional callable: fn(mixed): mixed — returns processed value or null/false on failure.
 	 * @return mixed The (filtered) field value.
@@ -343,10 +355,10 @@ class ApiController extends AbstractController
 
 	/**
 	 * Handles the search functionality for a specific entity class.
-	 * @param string $classname The fully qualified class name of the entity to search.
+	 * @param class-string $classname The fully qualified class name of the entity to search.
 	 * @param Request $request The HTTP request containing the search parameters as JSON body.
 	 * @param string $authLevel Defines the required authorization level for the search. Default is 'ROLE_ADMIN'.
-	 * @param array $serializerGroups Array of serialization groups to be applied to the response data. Optional.
+	 * @param string[] $serializerGroups Array of serialization groups to be applied to the response data. Optional.
 	 * @return JsonResponse JSON response containing the search results or an error message.
 	 * @throws Exception If the user lacks required permissions or an error occurs during the search process.
 	 */
@@ -388,10 +400,10 @@ class ApiController extends AbstractController
 
 	/**
 	 * Handles the retrieval and response of an entity by class name and UUID, with authorization checks.
-	 * @param string $classname The fully qualified class name of the entity to fetch.
+	 * @param class-string $classname The fully qualified class name of the entity to fetch.
 	 * @param string $uuid The unique identifier of the entity to fetch.
 	 * @param string $authLevel The required authorization level to access the entity. Default is 'ROLE_ADMIN'.
-	 * @param array $serializerGroups Optional serialization groups to apply when generating the response.
+	 * @param string[] $serializerGroups Optional serialization groups to apply when generating the response.
 	 * @return JsonResponse JSON response containing the fetched entity or an error message if the operation fails.
 	 */
 	protected function handleFetch(string $classname, string $uuid, string $authLevel = 'ROLE_ADMIN', array $serializerGroups = []): JsonResponse
@@ -419,7 +431,7 @@ class ApiController extends AbstractController
 	 * Handles the creation of an entity by deserializing the request data and saving it to the database.
 	 * Checks the user's authorization level, then validates the entity (Symfony Validator constraints
 	 * on the entity class) before persisting it.
-	 * @param string $classname Fully qualified class name of the entity to be created.
+	 * @param class-string $classname Fully qualified class name of the entity to be created.
 	 * @param Request $request HTTP request containing the serialized entity data in JSON format.
 	 * @param string $authLevel Required authorization level to perform the operation. Defaults to 'ROLE_ADMIN'.
 	 * @return JsonResponse 201 { uuid } on success; 401/403, 400 (empty or malformed body), 422 (validation failed) or 500 otherwise.
@@ -440,7 +452,7 @@ class ApiController extends AbstractController
 
 		try
 		{
-			$entity = $this->serializer->deserialize($request->getContent(), $classname, 'json', $context);
+			$entity = $this->requireApiEntity($this->serializer->deserialize($request->getContent(), $classname, 'json', $context));
 
 			if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, 'create.after') )
 			{
@@ -477,7 +489,7 @@ class ApiController extends AbstractController
 	 * Updates an existing entity with data provided in the request.
 	 * The entity is validated after the payload has been applied; if it is invalid, the in-memory
 	 * changes are discarded (so a later flush in the same request can't persist them) and 422 is returned.
-	 * @param string $classname The class name of the entity to update.
+	 * @param class-string $classname The class name of the entity to update.
 	 * @param Request $request The HTTP request containing the update data.
 	 * @return JsonResponse 200 on success; 401/403, 400 (empty or malformed body), 404, 422 (validation failed) or 500 otherwise.
 	 */
@@ -555,6 +567,7 @@ class ApiController extends AbstractController
 	 * "<index>.<field>" (e.g. "2.name"). Nothing is written unless every item passes.
 	 *
 	 * @param int|null $maxItems Maximum number of items per request (413 if exceeded); null for no limit.
+	 * @param class-string $classname
 	 */
 	protected function handleBulk(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): JsonResponse
 	{
@@ -601,6 +614,11 @@ class ApiController extends AbstractController
 				{
 					$entity = $this->findOneByUuid($classname, $uuid);
 
+					if ( $entity !== null )
+					{
+						$entity = $this->requireApiEntity($entity);
+					}
+
 					if ( $entity === null )
 					{
 						$this->discardChanges($updated);
@@ -626,7 +644,7 @@ class ApiController extends AbstractController
 						return $this->accessDeniedResponse();
 					}
 
-					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', $createContext);
+					$entity = $this->requireApiEntity($this->serializer->deserialize(json_encode($data), $classname, 'json', $createContext));
 
 					$created[] = $entity;
 					$operation = 'create.after';
@@ -681,6 +699,7 @@ class ApiController extends AbstractController
 	 * loaded entity as subject — so resource-level rules in isAuthorized() also apply.
 	 *
 	 * @param int|null $maxItems Maximum number of UUIDs per request (413 if exceeded); null for no limit.
+	 * @param class-string $classname
 	 */
 	protected function handleBulkDelete(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?int $maxItems = 1000): Response
 	{
@@ -761,8 +780,9 @@ class ApiController extends AbstractController
 	 *
 	 * The uuid is always ignored, whatever this returns.
 	 *
-	 * @param string $classname FQCN of the entity being written.
+	 * @param class-string $classname FQCN of the entity being written.
 	 * @param string $operation 'create' | 'update'
+	 * @return array<string, mixed>
 	 */
 	protected function getDenormalizationContext(string $classname, string $operation): array
 	{
@@ -778,6 +798,8 @@ class ApiController extends AbstractController
 	 * restriction surfaces as an exception rather than as a generic 500 response.
 	 *
 	 * @throws LogicException If the context restricts neither groups (non-empty, without '*') nor attributes.
+	 * @param class-string $classname
+	 * @return array<string, mixed>
 	 */
 	private function denormalizationContext(string $classname, string $operation, ?object $populate = null): array
 	{
@@ -838,9 +860,26 @@ class ApiController extends AbstractController
 
 
 	/**
+	 * The write handlers address entities by uuid, so they only support ApiEntity
+	 * subclasses. Fails loudly instead of with an undefined-method error.
+	 */
+	private function requireApiEntity(mixed $entity): ApiEntity
+	{
+		if ( !$entity instanceof ApiEntity )
+		{
+			throw new LogicException(sprintf('The write handlers only support entities extending %s, got %s.', ApiEntity::class, get_debug_type($entity)));
+		}
+
+		return $entity;
+	}
+
+
+
+	/**
 	 * Reverts in-memory changes on managed entities by reloading them from the database,
 	 * so a failed or rejected write can't be persisted by a later flush in the same request.
 	 * Entities that can't be reloaded (e.g. deleted meanwhile) are detached instead.
+	 * @param object[] $entities
 	 */
 	private function discardChanges(array $entities): void
 	{
@@ -868,6 +907,7 @@ class ApiController extends AbstractController
 	 * Resolves a UUID string to a Doctrine entity instance.
 	 * Returns null if the UUID is null or no matching entity is found.
 	 * Use this in custom create/update methods to look up relations sent as UUIDs from the frontend.
+	 * @param class-string $classname
 	 */
 	protected function resolveByUuid(string $classname, ?string $uuid): ?object
 	{
@@ -883,6 +923,7 @@ class ApiController extends AbstractController
 	 * column type rejects a malformed value (SQLSTATE 22P02) instead of simply not
 	 * matching it, which would otherwise surface as a 500. Other databases compare
 	 * it as a string and return no row anyway, so behaviour is the same everywhere.
+	 * @param class-string $classname
 	 */
 	private function findOneByUuid(string $classname, ?string $uuid): ?object
 	{
@@ -973,7 +1014,7 @@ class ApiController extends AbstractController
 
 	/**
 	 * Retrieves an entity by its class name and UUID, ensuring the user has the required authorization level.
-	 * @param string $classname The fully qualified class name of the entity to retrieve.
+	 * @param class-string $classname The fully qualified class name of the entity to retrieve.
 	 * @param string $uuid The UUID of the entity to retrieve.
 	 * @param string $authLevel The required authorization level to access the entity. Defaults to 'ROLE_ADMIN'.
 	 * @return object|null The entity object if found, or null if no matching entity is found.
@@ -997,8 +1038,8 @@ class ApiController extends AbstractController
 
 	/**
 	 * Retrieves a repository for the specified class name and ensures it extends ApiRepository.
-	 * @param string $classname Fully qualified class name of the entity for which the repository is retrieved.
-	 * @return ApiRepository The repository instance for the specified class.
+	 * @param class-string $classname Fully qualified class name of the entity for which the repository is retrieved.
+	 * @return ApiRepository<object> The repository instance for the specified class.
 	 * @throws InvalidArgumentException If the repository does not extend ApiRepository.
 	 */
 	protected function repository(string $classname): ApiRepository
@@ -1017,10 +1058,10 @@ class ApiController extends AbstractController
 
 	/**
 	 * Retrieves a list of entities based on search parameters and access level.
-	 * @param ApiRepository $repository The repository to query entities from.
+	 * @param ApiRepository<object> $repository The repository to query entities from.
 	 * @param ApiSearchParams $searchParams Parameters for search, including term, filters, offset, limit, and sorting options.
 	 * @param string $authLevel Required authorization level for access. Defaults to 'ROLE_ADMIN'.
-	 * @return array An array containing the list of items and the total count.
+	 * @return array{items: object[], count: int} The list of items and the total count.
 	 * @throws Exception If the user does not have the required access level.
 	 */
 	protected function getEntityList(ApiRepository $repository, ApiSearchParams $searchParams, string $authLevel = 'ROLE_ADMIN'): array
@@ -1045,10 +1086,10 @@ class ApiController extends AbstractController
 
 	/**
 	 * Retrieves a random list of entities based on the provided search parameters and authorization level.
-	 * @param ApiRepository $repository Repository instance used to perform the search.
+	 * @param ApiRepository<object> $repository Repository instance used to perform the search.
 	 * @param ApiSearchParams $searchParams Object containing search criteria such as term, filters, and limit.
 	 * @param string $authLevel Authorization level required to access this functionality. Defaults to 'ROLE_ADMIN'.
-	 * @return array An associative array containing the list of entities ('items') and the total count ('count').
+	 * @return array{items: object[], count: int} The list of entities ('items') and their number ('count').
 	 * @throws Exception If the current user does not have the required authorization level.
 	 */
 	protected function getRandomEntityList(ApiRepository $repository, ApiSearchParams $searchParams, string $authLevel = 'ROLE_ADMIN'): array

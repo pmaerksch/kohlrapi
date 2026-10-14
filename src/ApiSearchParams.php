@@ -7,6 +7,10 @@ use Symfony\Component\HttpFoundation\Request;
 
 readonly class ApiSearchParams
 {
+	/**
+	 * @param array<mixed> $filters
+	 * @param array<string, mixed>|null $sort
+	 */
 	public function __construct(
 		public int     $offset  = 0,
 		public int     $limit   = 25,
@@ -34,6 +38,9 @@ readonly class ApiSearchParams
 
 
 
+	/**
+	 * @param array<mixed> $data
+	 */
 	public static function fromArray(array $data): self
 	{
 		// Client input: coerce every field to its declared type rather than letting a
@@ -55,6 +62,10 @@ readonly class ApiSearchParams
 
 
 
+	/**
+	 * @param array<mixed> $filters
+	 * @param array<string, mixed>|null $sort
+	 */
 	public static function fromInternal(
 		int    $limit   = PHP_INT_MAX,
 		array  $filters = [],
