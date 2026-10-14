@@ -11,7 +11,7 @@ them reusable for other projects and other people.
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic. Filters use the format PrimeVue DataTables send.
 
 **Author:** Philip Märksch  
-**Version:** 1.15.0  
+**Version:** 2.0.0  
 **License:** MIT
 
 ---
@@ -37,7 +37,7 @@ kohlrAPI is not on Packagist. Add the GitHub repository as a [Composer VCS repos
     }
 ],
 "require": {
-    "pmaerksch/kohlrapi": "^1.15"
+    "pmaerksch/kohlrapi": "^2.0"
 }
 ```
 
@@ -385,6 +385,23 @@ Thrown by `requireField()` and `JsonHelper::require()` when a required field is 
 ---
 
 ## Changelog
+
+### 2.0.0
+
+**Breaking changes**
+
+- `handleCreate()`, `handleUpdate()` and `handleBulk()` throw a `LogicException` unless `getDenormalizationContext()` restricts the writable fields with serializer `groups` or `attributes`. Use `ApiController::WRITE_ALL_FIELDS` to deliberately allow every field. See [Writable fields](#writable-fields).
+- `ApiEntity::updateFromEntity()` is removed.
+- `handleCreate()`, `handleUpdate()`, `handleBulk()` and `handleBulkDelete()` are `protected`, like the other handlers.
+- The deprecated `$distinct` parameter of `ApiRepository::searchRandom()` is removed.
+- `symfony/deprecation-contracts` is no longer a dependency.
+
+**Upgrading from 1.x**
+
+1. In every controller that calls `handleCreate()`, `handleUpdate()` or `handleBulk()`, override `getDenormalizationContext()`. Prefer serializer groups (`['groups' => ['write']]` plus `#[Groups(['write'])]` on the client-writable properties) or an `attributes` allow-list. To keep the old behaviour for a controller, return `[self::WRITE_ALL_FIELDS => true]`. The 1.15 deprecation log lists every entity class that still needs this.
+2. Replace `updateFromEntity()` calls with explicit setters, e.g. in an `updateFromJson()` via `parseJson()`.
+3. If code outside a controller calls one of the write handlers, move that call into a controller action.
+4. Remove any named `distinct:` argument from `searchRandom()` calls.
 
 ### 1.15.0
 

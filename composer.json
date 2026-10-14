@@ -1,6 +1,6 @@
 {
 	"name": "pmaerksch/kohlrapi",
-	"version": "1.15.0",
+	"version": "2.0.0",
 	"description": "Abstract base classes for Symfony API backends — generic CRUD, search, filter, and sort.",
 	"type": "library",
 	"license": "MIT",
