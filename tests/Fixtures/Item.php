@@ -94,4 +94,11 @@ class Item extends ApiEntity
 	{
 		$this->tags->add(new Tag($this, $label));
 	}
+
+
+
+	public function removeTag(Tag $tag): void
+	{
+		$this->tags->removeElement($tag);
+	}
 }

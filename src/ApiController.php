@@ -27,6 +27,7 @@ use InvalidArgumentException;
 use LogicException;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\PersistentCollection;
 use Exception;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LogLevel;
@@ -897,6 +898,37 @@ class ApiController extends AbstractController
 
 
 	/**
+	 * Puts the elements removed from an entity's collections back. refresh() reloads a
+	 * collection, but doesn't cancel the orphan removals that taking elements out of it
+	 * scheduled (orphanRemoval: true) — the next flush() would still delete them.
+	 * PersistentCollection::add() cancels a pending orphan removal for the element.
+	 */
+	private function restoreRemovedElements(object $entity): void
+	{
+		$metadata = $this->em->getClassMetadata($entity::class);
+
+		foreach ( $metadata->getAssociationNames() as $field )
+		{
+			if ( !$metadata->isCollectionValuedAssociation($field) )
+			{
+				continue;
+			}
+
+			$collection = $metadata->getFieldValue($entity, $field);
+
+			if ( $collection instanceof PersistentCollection && $collection->isDirty() )
+			{
+				foreach ( $collection->getDeleteDiff() as $element )
+				{
+					$collection->add($element);
+				}
+			}
+		}
+	}
+
+
+
+	/**
 	 * The write handlers address entities by uuid, so they only support ApiEntity
 	 * subclasses. Fails loudly instead of with an undefined-method error.
 	 */
@@ -914,7 +946,8 @@ class ApiController extends AbstractController
 
 	/**
 	 * Reverts in-memory changes on managed entities by reloading them from the database,
-	 * so a failed or rejected write can't be persisted by a later flush in the same request.
+	 * so a failed or rejected write can't be persisted by a later flush in the same request
+	 * — including elements removed from collections with orphanRemoval.
 	 * Entities that can't be reloaded (e.g. deleted meanwhile) are detached instead.
 	 * @param object[] $entities
 	 */
@@ -927,6 +960,8 @@ class ApiController extends AbstractController
 
 		foreach ( $entities as $entity )
 		{
+			$this->restoreRemovedElements($entity);
+
 			try
 			{
 				$this->em->refresh($entity);
