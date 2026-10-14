@@ -9,6 +9,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\EntityRepository;
 use Exception;
 use pmaerksch\Kohlrapi\Tests\Fixtures\Item;
+use pmaerksch\Kohlrapi\Tests\Fixtures\SqlStateMiddleware;
 
 /**
  * Malformed UUIDs: SQLite simply finds no row; PostgreSQL's uuid type raises
@@ -69,6 +70,13 @@ class UuidLookupTest extends KohlrapiTestCase
 	public function testMalformedUuidIs404OnSqlite(): void
 	{
 		$this->assertSame(404, $this->controller()->handleFetch(Item::class, 'not-a-uuid')->getStatusCode());
+	}
+
+
+
+	public function testInvalidTextRepresentationThroughDbalIs404(): void
+	{
+		$this->assertSame(404, $this->controller()->handleFetch(Item::class, SqlStateMiddleware::marker('22P02'))->getStatusCode());
 	}
 
 

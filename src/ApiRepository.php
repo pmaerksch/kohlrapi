@@ -39,6 +39,7 @@
 namespace pmaerksch\Kohlrapi;
 
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\QueryBuilder;
 
 /**
@@ -159,7 +160,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * @param int $offset The starting position of the results to retrieve.
 	 * @param int $limit The maximum number of results to retrieve.
 	 * @param array<string, mixed>|null $sort An optional array defining the sorting criteria.
-	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits, or a filter value doesn't fit its field.
 	 * @return array{items: T[], count: int} Returns an associative array containing the paginated results under the 'items' key and the total count under the 'count' key.
 	 */
 	public function search(string $term, array $filters, int $offset, int $limit, ?array $sort): array
@@ -187,21 +188,21 @@ abstract class ApiRepository extends ServiceEntityRepository
 
 		// Paginated items
 		$itemsQb = clone $qb;
-		$items   = $itemsQb
+		$items   = $this->rejectInvalidInput(fn() => $itemsQb
 			->setFirstResult($offset)
 			->setMaxResults($limit)
 			->getQuery()
-			->getResult();
+			->getResult());
 
 		// Count (strip ORDER BY and GROUP BY to avoid issues)
 		$alias   = $this->getAlias();
 		$countQb = clone $qb;
-		$count   = (int)$countQb
+		$count   = (int)$this->rejectInvalidInput(fn() => $countQb
 			->resetDQLPart('orderBy')
 			->resetDQLPart('groupBy')
 			->select("COUNT(DISTINCT {$alias}.id)")
 			->getQuery()
-			->getSingleScalarResult();
+			->getSingleScalarResult());
 
 		return ['items' => $items, 'count' => $count];
 	}
@@ -219,7 +220,7 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * @param array<mixed> $filters Filter payload (same format as search()).
 	 * @param int $limit Maximum number of results to return.
 	 * @return array{items: T[], count: int}
-	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits.
+	 * @throws ApiInvalidSearchException If the request exceeds one of the repository's limits, or a filter value doesn't fit its field.
 	 */
 	public function searchRandom(string $term, array $filters, int $limit): array
 	{
@@ -243,11 +244,11 @@ abstract class ApiRepository extends ServiceEntityRepository
 		$this->applyGlobalSearch($qb, $term);
 		$this->applyFilters($qb, $filters);
 
-		$ids = $qb
+		$ids = $this->rejectInvalidInput(fn() => $qb
 			->select("DISTINCT {$alias}.id")
 			->resetDQLPart('orderBy')
 			->getQuery()
-			->getSingleColumnResult();
+			->getSingleColumnResult());
 
 		if ( count($ids) === 0 )
 		{
@@ -488,6 +489,40 @@ abstract class ApiRepository extends ServiceEntityRepository
 			{
 				$qb->andWhere($qb->expr()->andX(...$expressions));
 			}
+		}
+	}
+
+
+
+	/**
+	 * Runs a search query, turning database errors caused by the client's input into
+	 * ApiInvalidSearchException: a filter value that doesn't fit its column (SQLSTATE
+	 * class 22, e.g. PostgreSQL's 22P02 for "abc" on an integer column) or a match mode
+	 * the column type has no operator for (42883, e.g. LIKE on an integer). MySQL and
+	 * SQLite coerce such values instead of failing, so this only ever fires on databases
+	 * that check them. Every other database error is rethrown unchanged.
+	 *
+	 * @template R
+	 * @param callable(): R $query
+	 * @return R
+	 * @throws ApiInvalidSearchException
+	 */
+	private function rejectInvalidInput(callable $query): mixed
+	{
+		try
+		{
+			return $query();
+		}
+		catch ( DriverException $e )
+		{
+			$state = (string)$e->getSQLState();
+
+			if ( str_starts_with($state, '22') || $state === '42883' )
+			{
+				throw new ApiInvalidSearchException('A filter value does not match the type of its field', 0, $e);
+			}
+
+			throw $e;
 		}
 	}
 

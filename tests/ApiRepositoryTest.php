@@ -2,10 +2,12 @@
 
 namespace pmaerksch\Kohlrapi\Tests;
 
+use Doctrine\DBAL\Exception\DriverException;
 use pmaerksch\Kohlrapi\ApiInvalidSearchException;
 use pmaerksch\Kohlrapi\ApiSearchParams;
 use pmaerksch\Kohlrapi\Tests\Fixtures\Item;
 use pmaerksch\Kohlrapi\Tests\Fixtures\ItemRepository;
+use pmaerksch\Kohlrapi\Tests\Fixtures\SqlStateMiddleware;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 class ApiRepositoryTest extends KohlrapiTestCase
@@ -251,6 +253,45 @@ class ApiRepositoryTest extends KohlrapiTestCase
 		};
 
 		$this->assertSame([], $repo->search(str_repeat('x', 300), [], 200_000, 10, null)['items']);
+	}
+
+
+
+	public static function invalidInputStates(): array
+	{
+		return [
+			'invalid text representation' => ['22P02'],
+			'invalid datetime format'     => ['22007'],
+			'operator does not exist'     => ['42883'],
+		];
+	}
+
+
+
+	#[DataProvider('invalidInputStates')]
+	public function testFilterValueRejectedByDatabaseIs400(string $sqlState): void
+	{
+		$body     = json_encode(['filters' => ['qty' => self::filter('equals', SqlStateMiddleware::marker($sqlState))]]);
+		$response = $this->controller()->handleSearch(Item::class, $this->request($body));
+
+		$this->assertSame(400, $response->getStatusCode());
+		$this->assertSame('api.errors.invalidSearch', $this->body($response)['key']);
+	}
+
+
+
+	public function testSearchRandomRejectsInvalidInput(): void
+	{
+		$this->expectException(ApiInvalidSearchException::class);
+		$this->repo->searchRandom('', ['qty' => self::filter('equals', SqlStateMiddleware::marker('22P02'))], 2);
+	}
+
+
+
+	public function testOtherDatabaseErrorsAreRethrown(): void
+	{
+		$this->expectException(DriverException::class);
+		$this->repo->search('', ['qty' => self::filter('equals', SqlStateMiddleware::marker('08006'))], 0, 10, null);
 	}
 
 

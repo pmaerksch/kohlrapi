@@ -12,6 +12,7 @@ use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\Persistence\AbstractManagerRegistry;
 use Doctrine\Persistence\ObjectRepository;
 use pmaerksch\Kohlrapi\Tests\Fixtures\Item;
+use pmaerksch\Kohlrapi\Tests\Fixtures\SqlStateMiddleware;
 use pmaerksch\Kohlrapi\Tests\Fixtures\TestController;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
@@ -55,6 +56,8 @@ abstract class KohlrapiTestCase extends TestCase
 		{
 			$config->enableNativeLazyObjects(true);
 		}
+
+		$config->setMiddlewares([new SqlStateMiddleware()]);
 
 		$registry = null;
 		$config->setRepositoryFactory(new class($registry) implements RepositoryFactory
