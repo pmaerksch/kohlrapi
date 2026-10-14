@@ -84,6 +84,17 @@ class WriteHandlersTest extends KohlrapiTestCase
 
 
 
+	public function testUpdateWithExplicitUuid(): void
+	{
+		$item     = $this->createItem('old');
+		$response = $this->controller()->handleUpdate(Item::class, $this->request('{"name":"new"}', ['id' => $item->getUuid()]), 'ROLE_ADMIN', $item->getUuid());
+
+		$this->assertSame(200, $response->getStatusCode());
+		$this->assertSame('new', $this->reload($item)?->getName());
+	}
+
+
+
 	public function testUpdateOfUnknownUuidIs404(): void
 	{
 		$response = $this->controller()->handleUpdate(Item::class, $this->request('{"name":"x"}', ['uuid' => 'a3c1b2d4-0000-4000-8000-000000000000']));

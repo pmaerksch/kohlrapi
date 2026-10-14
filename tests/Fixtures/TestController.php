@@ -61,9 +61,9 @@ class TestController extends ApiController
 
 
 
-	public function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
+	public function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?string $uuid = null): JsonResponse
 	{
-		return parent::handleUpdate($classname, $request, $authLevel);
+		return parent::handleUpdate($classname, $request, $authLevel, $uuid);
 	}
 
 

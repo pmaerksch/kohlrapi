@@ -498,11 +498,13 @@ class ApiController extends AbstractController
 	 * changes are discarded (so a later flush in the same request can't persist them) and 422 is returned.
 	 * @param class-string $classname The class name of the entity to update.
 	 * @param Request $request The HTTP request containing the update data.
+	 * @param string|null $uuid The entity's uuid; null reads the route parameter {uuid}.
 	 * @return JsonResponse 200 on success; 401/403, 400 (empty or malformed body), 404, 422 (validation failed) or 500 otherwise.
 	 */
-	protected function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
+	protected function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN', ?string $uuid = null): JsonResponse
 	{
-		[$entity, $allowed] = $this->findAuthorized($classname, $request->attributes->get('uuid'), $authLevel, 'update');
+		$uuid             ??= $request->attributes->get('uuid');
+		[$entity, $allowed] = $this->findAuthorized($classname, is_string($uuid) ? $uuid : null, $authLevel, 'update');
 
 		if ( !$allowed )
 		{
