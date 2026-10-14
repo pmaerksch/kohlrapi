@@ -18,7 +18,7 @@ It features a set of abstract base classes for Symfony API backends, providing g
 
 ## Requirements
 
-- PHP >= 8.2
+- PHP >= 8.4 (required by DoctrineBundle 3)
 - Symfony 7.4 or 8.0
 - Doctrine ORM >= 3.6
 - Symfony SecurityBundle (for `getUser()` / `isGranted()` in `ApiController`)
@@ -404,7 +404,7 @@ composer test      # PHPUnit: Doctrine ORM on in-memory SQLite + the real Symfon
 composer analyse   # PHPStan, level 8
 ```
 
-CI runs both on PHP 8.2–8.5, plus once with the lowest allowed dependency versions.
+CI runs both on PHP 8.4 and 8.5, plus once with the lowest allowed dependency versions.
 
 ---
 
