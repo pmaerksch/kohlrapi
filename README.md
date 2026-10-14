@@ -11,7 +11,7 @@ them reusable for other projects and other people.
 It features a set of abstract base classes for Symfony API backends, providing generic CRUD, search, filter, and sort logic. Filters use the format PrimeVue DataTables send.
 
 **Author:** Philip Märksch  
-**Version:** 1.14.0  
+**Version:** 1.15.0  
 **License:** MIT
 
 ---
@@ -37,7 +37,7 @@ kohlrAPI is not on Packagist. Add the GitHub repository as a [Composer VCS repos
     }
 ],
 "require": {
-    "pmaerksch/kohlrapi": "^1.14"
+    "pmaerksch/kohlrapi": "^1.15"
 }
 ```
 
@@ -388,6 +388,27 @@ Thrown by `requireField()` and `JsonHelper::require()` when a required field is 
 ---
 
 ## Changelog
+
+### 1.15.0
+
+**Security**
+
+- New `getDenormalizationContext()` hook to restrict which fields clients may write in `handleCreate()`, `handleUpdate()` and `handleBulk()` (serializer `groups` or `attributes`). Without it every writable property can be set by the payload; this default is deprecated and will be rejected in 2.0. See [Writable fields](#writable-fields).
+- New opt-in `reauthorizesWrites()`: authorizes every create/update again on the resulting entity (operations `create.after` / `update.after`) before anything is written, so a payload can't move an entity to an owner or tenant the user has no rights on.
+
+**Fixes**
+
+- Malformed write payloads (invalid JSON, wrong value types) return `400` (`api.errors.invalidJson` / `api.errors.invalidBody`) instead of `500` `api.errors.saveFailed`. Errors that aren't `Exception`s (e.g. a `TypeError` from a typed setter) are now caught and return `500` as well.
+- Malformed UUIDs return `404` instead of `500` on PostgreSQL, whose `uuid` column type rejects them (SQLSTATE `22P02`). Applies to `handleFetch()`, `handleUpdate()`, the bulk handlers, `getEntity()` and `resolveByUuid()`.
+
+**Deprecations**
+
+- `ApiEntity::updateFromEntity()`: it silently skips `private` properties. Removed in 2.0; set the fields explicitly instead.
+- Calling the write handlers without restricting writable fields (see above).
+
+**Changes**
+
+- Added `symfony/deprecation-contracts` as an explicit dependency.
 
 ### 1.14.0
 
