@@ -19,9 +19,16 @@ use Exception;
  * XXXXX when one of its bound values is the string "__sqlstate:XXXXX__" — e.g.
  * PostgreSQL's 22P02 for a malformed uuid or a non-numeric value on an int column.
  * The failure goes through DBAL's normal exception conversion.
+ *
+ * Also records every executed statement in $executed, for query-count assertions.
  */
 class SqlStateMiddleware implements Middleware
 {
+	/** @var string[] SQL of every executed statement, in order. */
+	public static array $executed = [];
+
+
+
 	public static function marker(string $sqlState): string
 	{
 		return "__sqlstate:{$sqlState}__";
@@ -39,9 +46,14 @@ class SqlStateMiddleware implements Middleware
 				{
 					public function prepare(string $sql): Statement
 					{
-						return new class(parent::prepare($sql)) extends AbstractStatementMiddleware
+						return new class(parent::prepare($sql), $sql) extends AbstractStatementMiddleware
 						{
 							private ?string $sqlState = null;
+
+							public function __construct(Statement $statement, private string $sql)
+							{
+								parent::__construct($statement);
+							}
 
 							public function bindValue(int|string $param, mixed $value, ParameterType $type): void
 							{
@@ -55,6 +67,8 @@ class SqlStateMiddleware implements Middleware
 
 							public function execute(): Result
 							{
+								SqlStateMiddleware::$executed[] = $this->sql;
+
 								if ( $this->sqlState !== null )
 								{
 									throw new class($this->sqlState) extends Exception implements DriverException

@@ -613,18 +613,16 @@ class ApiController extends AbstractController
 
 		try
 		{
+			// One query (per 1000 uuids) instead of one per item.
+			$existing = $this->findAllByUuid($classname, array_filter(array_column($items, 'uuid')));
+
 			foreach ( $items as $index => $data )
 			{
 				$uuid = $data[ 'uuid' ] ?? null;
 
 				if ( $uuid )
 				{
-					$entity = $this->findOneByUuid($classname, $uuid);
-
-					if ( $entity !== null )
-					{
-						$entity = $this->requireApiEntity($entity);
-					}
+					$entity = $existing[ strtolower($uuid) ] ?? null;
 
 					// A record the user may not update is reported exactly like a missing
 					// one (the request-level check already passed), so the response never
@@ -728,10 +726,11 @@ class ApiController extends AbstractController
 		// Resolve and authorize everything first, and only then schedule removals —
 		// so an early return can't leave a partial set of removals in the unit of work.
 		$entities = [];
+		$existing = $this->findAllByUuid($classname, $uuids);
 
 		foreach ( $uuids as $uuid )
 		{
-			$entity = $this->findOneByUuid($classname, $uuid);
+			$entity = $existing[ strtolower($uuid) ] ?? null;
 
 			// Not permitted is reported exactly like not found (see handleBulk()).
 			if ( $entity === null || !$this->can($authLevel, $entity, $classname, 'delete') )
@@ -945,6 +944,52 @@ class ApiController extends AbstractController
 	protected function resolveByUuid(string $classname, ?string $uuid): ?object
 	{
 		return $this->findOneByUuid($classname, $uuid);
+	}
+
+
+
+	/**
+	 * Loads the entities for many uuids with one IN query per 1000 uuids, keyed by
+	 * lower-cased uuid (PostgreSQL returns uuids lower-cased whatever case was sent;
+	 * look entities up with strtolower()). Unknown uuids are simply absent.
+	 *
+	 * On PostgreSQL a single malformed uuid fails the whole IN query (SQLSTATE 22P02);
+	 * that chunk then falls back to one lookup per uuid, so the valid ones are still found.
+	 *
+	 * @param class-string $classname
+	 * @param string[] $uuids
+	 * @return array<string, ApiEntity>
+	 */
+	private function findAllByUuid(string $classname, array $uuids): array
+	{
+		$byUuid = [];
+
+		foreach ( array_chunk(array_values(array_unique($uuids)), 1000) as $chunk )
+		{
+			try
+			{
+				$found = $this->em->getRepository($classname)->findBy(['uuid' => $chunk]);
+			}
+			catch ( DriverException $e )
+			{
+				if ( $e->getSQLState() !== '22P02' )
+				{
+					throw $e;
+				}
+
+				$found = array_filter(array_map(fn(string $uuid) => $this->findOneByUuid($classname, $uuid), $chunk));
+			}
+
+			foreach ( $found as $entity )
+			{
+				$entity = $this->requireApiEntity($entity);
+				$key    = strtolower((string)$entity->getUuid());
+
+				$byUuid[ $key ] = $entity;
+			}
+		}
+
+		return $byUuid;
 	}
 
 

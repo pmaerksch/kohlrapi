@@ -6,6 +6,7 @@ use LogicException;
 use pmaerksch\Kohlrapi\ApiController;
 use pmaerksch\Kohlrapi\AuthorizationContext;
 use pmaerksch\Kohlrapi\Tests\Fixtures\Item;
+use pmaerksch\Kohlrapi\Tests\Fixtures\SqlStateMiddleware;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
 
@@ -335,6 +336,76 @@ class WriteHandlersTest extends KohlrapiTestCase
 
 		$this->assertSame(413, $response->getStatusCode());
 		$this->assertSame('api.errors.tooManyItems', $this->body($response)['key']);
+	}
+
+
+
+	public function testBulkLoadsEntitiesWithOneQuery(): void
+	{
+		$payload = [];
+
+		for ( $i = 0; $i < 20; $i++ )
+		{
+			$payload[] = ['uuid' => $this->createItem("item$i")->getUuid(), 'name' => "renamed$i"];
+		}
+
+		$this->em->clear();
+		SqlStateMiddleware::$executed = [];
+		$response = $this->controller()->handleBulk(Item::class, $this->request(json_encode($payload)));
+		$selects  = array_filter(SqlStateMiddleware::$executed, fn(string $sql) => str_starts_with($sql, 'SELECT'));
+
+		$this->assertSame(200, $response->getStatusCode());
+		$this->assertCount(1, $selects);
+	}
+
+
+
+	public function testBulkDeleteLoadsEntitiesWithOneQuery(): void
+	{
+		$uuids = [];
+
+		for ( $i = 0; $i < 20; $i++ )
+		{
+			$uuids[] = $this->createItem("item$i")->getUuid();
+		}
+
+		$this->em->clear();
+		SqlStateMiddleware::$executed = [];
+		$response = $this->controller()->handleBulkDelete(Item::class, $this->request(json_encode($uuids)));
+		// Only the entity lookups: the cascade delete of each item's tags adds its own SELECTs.
+		$selects  = array_filter(SqlStateMiddleware::$executed, fn(string $sql) => str_starts_with($sql, 'SELECT') && str_contains($sql, 'FROM Item'));
+
+		$this->assertSame(204, $response->getStatusCode());
+		$this->assertCount(1, $selects);
+		$this->assertSame(0, $this->em->getRepository(Item::class)->count([]));
+	}
+
+
+
+	public function testBulkMatchesUuidsCaseInsensitively(): void
+	{
+		$item = $this->createItem('a');
+		$this->em->getConnection()->executeStatement('UPDATE item SET uuid = UPPER(uuid)');
+		$this->em->clear();
+
+		$response = $this->controller()->handleBulk(Item::class, $this->request(json_encode([['uuid' => strtoupper((string)$item->getUuid()), 'name' => 'b']])));
+
+		$this->assertSame(200, $response->getStatusCode());
+	}
+
+
+
+	public function testBulkWithOneMalformedUuidStillFindsTheOthers(): void
+	{
+		$item     = $this->createItem('a');
+		$response = $this->controller()->handleBulk(Item::class, $this->request(json_encode([
+			['uuid' => $item->getUuid(), 'name' => 'b'],
+			['uuid' => SqlStateMiddleware::marker('22P02'), 'name' => 'c'],
+		])));
+
+		// the valid uuid is still resolved; the malformed one is reported as not found
+		$this->assertSame(404, $response->getStatusCode());
+		$this->assertSame(SqlStateMiddleware::marker('22P02'), $this->body($response)['uuid']);
 	}
 
 
