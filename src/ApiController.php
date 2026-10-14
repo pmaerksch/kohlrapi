@@ -495,11 +495,9 @@ class ApiController extends AbstractController
 	 */
 	protected function handleUpdate(string $classname, Request $request, string $authLevel = 'ROLE_ADMIN'): JsonResponse
 	{
-		// Loaded before the auth check so the entity is available as the
-		// authorization subject (for resource-level decisions).
-		$entity = $this->findOneByUuid($classname, $request->attributes->get('uuid'));
+		[$entity, $allowed] = $this->findAuthorized($classname, $request->attributes->get('uuid'), $authLevel, 'update');
 
-		if ( !$this->can($authLevel, $entity, $classname, 'update') )
+		if ( !$allowed )
 		{
 			return $this->accessDeniedResponse();
 		}
@@ -619,16 +617,13 @@ class ApiController extends AbstractController
 						$entity = $this->requireApiEntity($entity);
 					}
 
-					if ( $entity === null )
+					// A record the user may not update is reported exactly like a missing
+					// one (the request-level check already passed), so the response never
+					// reveals whether a uuid exists.
+					if ( $entity === null || !$this->can($authLevel, $entity, $classname, 'update') )
 					{
 						$this->discardChanges($updated);
 						return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
-					}
-
-					if ( !$this->can($authLevel, $entity, $classname, 'update') )
-					{
-						$this->discardChanges($updated);
-						return $this->accessDeniedResponse();
 					}
 
 					$updated[] = $entity;
@@ -729,14 +724,10 @@ class ApiController extends AbstractController
 		{
 			$entity = $this->findOneByUuid($classname, $uuid);
 
-			if ( $entity === null )
+			// Not permitted is reported exactly like not found (see handleBulk()).
+			if ( $entity === null || !$this->can($authLevel, $entity, $classname, 'delete') )
 			{
 				return $this->errorResponse("Record $uuid not found", Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
-			}
-
-			if ( !$this->can($authLevel, $entity, $classname, 'delete') )
-			{
-				return $this->accessDeniedResponse();
 			}
 
 			$entities[] = $entity;
@@ -1024,16 +1015,41 @@ class ApiController extends AbstractController
 	 */
 	protected function getEntity(string $classname, string $uuid, string $authLevel = 'ROLE_ADMIN'): ?object
 	{
-		// Loaded before the auth check so the entity is available as the
-		// authorization subject (for resource-level decisions).
-		$entity = $this->findOneByUuid($classname, $uuid);
+		[$entity, $allowed] = $this->findAuthorized($classname, $uuid, $authLevel, 'fetch');
 
-		if ( !$this->can($authLevel, $entity, $classname, 'fetch') )
+		if ( !$allowed )
 		{
 			throw new AccessDeniedException();
 		}
 
 		return $entity;
+	}
+
+
+
+	/**
+	 * Loads an entity by uuid and authorizes it, with the entity as subject.
+	 *
+	 * An entity the user may not access is treated exactly like a missing one, so a
+	 * response never reveals whether a uuid exists: both fall back to the class-level
+	 * check without a subject. If that denies, the caller answers 401/403; if it
+	 * allows, the entity comes back as null and the caller answers 404.
+	 *
+	 * @param class-string $classname
+	 * @return array{0: object|null, 1: bool} [the entity if found and permitted, whether access is allowed]
+	 */
+	private function findAuthorized(string $classname, ?string $uuid, string $authLevel, string $operation): array
+	{
+		// Loaded before the auth check so the entity is available as the
+		// authorization subject (for resource-level decisions).
+		$entity = $this->findOneByUuid($classname, $uuid);
+
+		if ( $entity !== null && $this->can($authLevel, $entity, $classname, $operation) )
+		{
+			return [$entity, true];
+		}
+
+		return [null, $this->can($authLevel, null, $classname, $operation)];
 	}
 
 

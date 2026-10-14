@@ -314,6 +314,8 @@ Immutable bundle passed to `isAuthorized()`. Built by `can()` — you never cons
 
 > **Note:** for `fetch`/`update` the entity is loaded *before* the auth check so it is available as `$subject` (enabling per-resource decisions). The default Symfony implementation passes `$subject` on to `isGranted()`, so your voters receive the entity.
 
+**Existence is never revealed.** An entity the user may not access is answered exactly like a missing one, so a client can't probe which uuids exist. Both cases fall back to the class-level check without a subject: if that denies, the response is `401`/`403`; if it allows, `404`. In the bulk handlers (whose request-level check has already passed) a forbidden item is always `404`. `getEntity()` returns `null` for a forbidden entity when the class-level check allows.
+
 #### Bulk endpoints — recommended route convention
 
 ```php
@@ -336,7 +338,7 @@ Bulk delete request body (array of UUIDs):
 ["uuid-1", "uuid-2", "uuid-3"]
 ```
 
-Both bulk requests are **all-or-nothing**: if any item is not found (`404`), not permitted (`403`) or invalid, nothing is written.
+Both bulk requests are **all-or-nothing**: if any item is not found or not permitted (both `404`, see below) or invalid, nothing is written.
 
 **Validation.** Each item is validated against the entity's Symfony Validator constraints. Violations for all items are returned together, keyed `<index>.<field>`:
 
