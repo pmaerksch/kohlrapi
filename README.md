@@ -231,7 +231,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 | `handleFetch($classname, $uuid, $authLevel, $groups)` | Fetch a single entity by UUID with auth check |
 | `handleCreate($classname, $request, $authLevel)` | Deserialize, validate + persist a new entity. Returns `400` if the body is malformed (invalid JSON, wrong value types) and `422` with violations if the entity is invalid. |
 | `handleUpdate($classname, $request, $authLevel, $uuid = null)` | Deserialize, validate + update an existing entity by UUID — `$uuid`, or the route parameter `{uuid}` when omitted. Returns `400` if the body is malformed and `422` with violations if the result is invalid; the rejected changes are discarded. |
-| `handleBulk($classname, $request, $authLevel, $maxItems = 1000)` | Create or update multiple entities, all-or-nothing; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`). Every item is validated; see [Bulk endpoints](#bulk-endpoints--recommended-route-convention). |
+| `handleBulk($classname, $request, $authLevel, $maxItems = 1000)` | Create or update multiple entities, all-or-nothing; items with a uuid are updated, items without are created. Returns `{ uuids: string[] }` in input order. Authorization runs for the request (`bulk`) and again per item (`update` with the entity as subject, or `create`), then on each resulting entity (`update.after` / `create.after`). Every item is validated; see [Bulk endpoints](#bulk-endpoints--recommended-route-convention). |
 | `handleBulkDelete($classname, $request, $authLevel, $maxItems = 1000)` | Delete multiple entities by UUID, all-or-nothing. Expects a JSON array of UUID strings. Returns `204`. Authorization runs for the request (`bulkDelete`, no subject) and again per entity (`delete` with the entity as subject). |
 | `handleSearch($classname, $request, $authLevel, $groups)` | Parses search params from the request body, then runs a paginated search; returns `items + count + maxCount`. Returns `400` on invalid JSON (`api.errors.invalidJson`) or a rejected search (`api.errors.invalidSearch`, see [`ApiRepository`](#apirepository)). |
 | `getEntity($classname, $uuid, $authLevel)` | Fetch a single entity object (no serialization) |
@@ -410,73 +410,7 @@ CI runs both on PHP 8.4 and 8.5, plus once with the lowest allowed dependency ve
 
 ## Changelog
 
-### 2.0.0
-
-**Breaking changes**
-
-- `handleCreate()`, `handleUpdate()` and `handleBulk()` throw a `LogicException` unless `getDenormalizationContext()` restricts the writable fields with serializer `groups` or `attributes`. Use `ApiController::WRITE_ALL_FIELDS` to deliberately allow every field. See [Writable fields](#writable-fields).
-- `ApiEntity::updateFromEntity()` is removed.
-- `handleCreate()`, `handleUpdate()`, `handleBulk()` and `handleBulkDelete()` are `protected`, like the other handlers.
-- The deprecated `$distinct` parameter of `ApiRepository::searchRandom()` is removed.
-- `symfony/deprecation-contracts` is no longer a dependency.
-
-**Upgrading from 1.x**
-
-1. In every controller that calls `handleCreate()`, `handleUpdate()` or `handleBulk()`, override `getDenormalizationContext()`. Prefer serializer groups (`['groups' => ['write']]` plus `#[Groups(['write'])]` on the client-writable properties) or an `attributes` allow-list. To keep the old behaviour for a controller, return `[self::WRITE_ALL_FIELDS => true]`. The 1.15 deprecation log lists every entity class that still needs this.
-2. Replace `updateFromEntity()` calls with explicit setters, e.g. in an `updateFromJson()` via `parseJson()`.
-3. If code outside a controller calls one of the write handlers, move that call into a controller action.
-4. Remove any named `distinct:` argument from `searchRandom()` calls.
-
-### 1.15.0
-
-**Security**
-
-- New `getDenormalizationContext()` hook to restrict which fields clients may write in `handleCreate()`, `handleUpdate()` and `handleBulk()` (serializer `groups` or `attributes`). Without it every writable property can be set by the payload; this default is deprecated and will be rejected in 2.0. See [Writable fields](#writable-fields).
-- New opt-in `reauthorizesWrites()`: authorizes every create/update again on the resulting entity (operations `create.after` / `update.after`) before anything is written, so a payload can't move an entity to an owner or tenant the user has no rights on.
-
-**Fixes**
-
-- Malformed write payloads (invalid JSON, wrong value types) return `400` (`api.errors.invalidJson` / `api.errors.invalidBody`) instead of `500` `api.errors.saveFailed`. Errors that aren't `Exception`s (e.g. a `TypeError` from a typed setter) are now caught and return `500` as well.
-- Malformed UUIDs return `404` instead of `500` on PostgreSQL, whose `uuid` column type rejects them (SQLSTATE `22P02`). Applies to `handleFetch()`, `handleUpdate()`, the bulk handlers, `getEntity()` and `resolveByUuid()`.
-
-**Deprecations**
-
-- `ApiEntity::updateFromEntity()`: it silently skips `private` properties. Removed in 2.0; set the fields explicitly instead.
-- Calling the write handlers without restricting writable fields (see above).
-
-**Changes**
-
-- Added `symfony/deprecation-contracts` as an explicit dependency.
-
-### 1.14.0
-
-**Features**
-
-- `handleCreate()`, `handleUpdate()` and `handleBulk()` validate entities with the Symfony Validator and return `422` with per-field violations (bulk: keyed `<index>.<field>`). Entities without constraints are unaffected. Rejected changes on managed entities are discarded.
-- `handleBulk()` and `handleBulkDelete()` take an optional `$maxItems` limit (default `1000`, `null` for none) and return `413` above it.
-- New `collectViolations()` and `tooManyItemsResponse()` helpers.
-
-**Fixes**
-
-- Bulk requests are now truly all-or-nothing: previously a `404`/`403` part-way through could leave earlier changes (or scheduled deletions) in Doctrine's unit of work, to be written by any later `flush()` in the same request.
-
-### 1.13.0
-
-**Fixes**
-
-- `ApiEntity::updateFromEntity()` no longer copies `id` onto the target entity (previously it could null the id of a managed entity and corrupt Doctrine's identity map).
-- `JsonHelper::require()` accepts falsy-but-present values such as `"0"`; only `null`, `''` and `[]` count as empty.
-- `ApiRepository::searchRandom()` no longer relies on a non-standard `RAND()` DQL function and works on every database Doctrine supports. It now also honours `getMaxLimit()`.
-- LIKE-based filters (`contains`, `notContains`, `startsWith`, `endsWith`) match `%` and `_` literally instead of as wildcards.
-- Malformed search payloads (non-object bodies, filters/sorts of the wrong shape) return `400` or are ignored instead of causing a `500`.
-- `handleBulk()` / `handleBulkDelete()` run authorization per item with the entity as subject, so resource-level rules in `isAuthorized()` also apply to bulk writes. Malformed bulk bodies return `400`.
-- Added the missing `symfony/security-bundle` dependency.
-
-**Changes**
-
-- `JsonHelper::require()` throws `ApiMissingFieldException` (convertible to a `422` via `missingFieldResponse()`), and invalid input throws `InvalidArgumentException`, both instead of a plain `\Exception` with codes 1–3. Code catching `\Exception` is unaffected.
-- New `accessDeniedResponse()` helper (`401` for anonymous users, `403` otherwise).
-- The `$distinct` parameter of `searchRandom()` is deprecated and has no effect; results are always distinct.
+See [CHANGELOG.md](CHANGELOG.md), including the [upgrade guide from 1.x](CHANGELOG.md#upgrading-from-1x).
 
 ---
 
