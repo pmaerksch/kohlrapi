@@ -2,11 +2,37 @@
 
 namespace pmaerksch\Kohlrapi\Tests\Fixtures;
 
+use Closure;
 use Doctrine\ORM\QueryBuilder;
 use pmaerksch\Kohlrapi\ApiRepository;
 
 class ItemRepository extends ApiRepository
 {
+	/** Optional extra base conditions / joins per test: fn(QueryBuilder): void */
+	public ?Closure $baseConditions = null;
+
+	/** Optional custom sort per test: fn(QueryBuilder, array): bool */
+	public ?Closure $customSort = null;
+
+
+
+	protected function applyBaseConditions(QueryBuilder $qb): void
+	{
+		if ( $this->baseConditions !== null )
+		{
+			($this->baseConditions)($qb);
+		}
+	}
+
+
+
+	protected function applyCustomSort(QueryBuilder $qb, array $sort): bool
+	{
+		return $this->customSort !== null && ($this->customSort)($qb, $sort);
+	}
+
+
+
 	protected function getAlias(): string
 	{
 		return 'i';

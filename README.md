@@ -167,6 +167,8 @@ Subclasses **may** override:
 | `getMaxConstraints()` | Most filter constraints per request, across all fields (default `50`) |
 | `getMaxInValues()` | Most values in one `in` constraint (default `1000`) |
 
+Pagination counts entities, not SQL rows (via Doctrine's `Paginator`), so `applyBaseConditions()`, `applyGlobalSearch()` and `applyCustomSort()` may join, fetch-join collections, `GROUP BY` and filter with `HAVING`; `items` and `count` stay correct.
+
 A request exceeding one of the last four limits throws `ApiInvalidSearchException`, which `handleSearch()` answers with `400` (`api.errors.invalidSearch`). Return `null` from a limit to disable it. The limits also apply to `getEntityList()` / `getRandomEntityList()` — catch the exception there if you call them yourself.
 
 #### Filter payload (PrimeVue format)

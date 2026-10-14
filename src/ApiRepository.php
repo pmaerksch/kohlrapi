@@ -41,6 +41,7 @@ namespace pmaerksch\Kohlrapi;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\QueryBuilder;
+use Doctrine\ORM\Tools\Pagination\Paginator;
 
 /**
  * @template T of object
@@ -186,23 +187,18 @@ abstract class ApiRepository extends ServiceEntityRepository
 		$this->applyFilters($qb, $filters);
 		$this->applySort($qb, $sort);
 
-		// Paginated items
-		$itemsQb = clone $qb;
-		$items   = $this->rejectInvalidInput(fn() => $itemsQb
+		$query = $qb->getQuery()
 			->setFirstResult($offset)
-			->setMaxResults($limit)
-			->getQuery()
-			->getResult());
+			->setMaxResults($limit);
 
-		// Count (strip ORDER BY and GROUP BY to avoid issues)
-		$alias   = $this->getAlias();
-		$countQb = clone $qb;
-		$count   = (int)$this->rejectInvalidInput(fn() => $countQb
-			->resetDQLPart('orderBy')
-			->resetDQLPart('groupBy')
-			->select("COUNT(DISTINCT {$alias}.id)")
-			->getQuery()
-			->getSingleScalarResult());
+		// Doctrine's Paginator limits entities, not SQL rows: with a joined collection a
+		// plain LIMIT would cut pages short and hydrate partial collections. Its count
+		// also copes with GROUP BY / HAVING. The extra id query that fetch-joins need is
+		// only paid when the query actually joins something.
+		$paginator = new Paginator($query, fetchJoinCollection: count($qb->getDQLPart('join')) > 0);
+
+		$items = $this->rejectInvalidInput(fn() => iterator_to_array($paginator, false));
+		$count = $this->rejectInvalidInput(fn() => count($paginator));
 
 		return ['items' => $items, 'count' => $count];
 	}
