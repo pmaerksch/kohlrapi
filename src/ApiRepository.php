@@ -164,10 +164,9 @@ abstract class ApiRepository extends ServiceEntityRepository
 	 * @param string $term Global search term.
 	 * @param array $filters Filter payload (same format as search()).
 	 * @param int $limit Maximum number of results to return.
-	 * @param bool $distinct Deprecated, no effect: results are always distinct entities.
 	 * @return array { items, count }
 	 */
-	public function searchRandom(string $term, array $filters, int $limit, bool $distinct = false): array
+	public function searchRandom(string $term, array $filters, int $limit): array
 	{
 		$maxLimit = $this->getMaxLimit();
 		if ( $maxLimit !== null )
