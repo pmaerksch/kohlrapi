@@ -24,6 +24,7 @@ namespace pmaerksch\Kohlrapi;
 
 use Doctrine\DBAL\Exception\DriverException;
 use InvalidArgumentException;
+use LogicException;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
@@ -43,14 +44,17 @@ use Throwable;
 
 class ApiController extends AbstractController
 {
+	/**
+	 * Context key for {@see getDenormalizationContext()}: set it to true to deliberately
+	 * let clients write every writable property of an entity (the pre-2.0 default).
+	 */
+	public const WRITE_ALL_FIELDS = 'kohlrapi_write_all_fields';
+
 	protected EntityManagerInterface $em;
 	protected SerializerInterface    $serializer;
 	protected KernelInterface        $kernel;
 	protected ValidatorInterface     $validator;
 	protected RequestStack           $requestStack;
-
-	/** Classes already reported as written without a field restriction (one deprecation per class and controller instance). */
-	private array $unrestrictedWarned = [];
 
 
 
@@ -432,9 +436,11 @@ class ApiController extends AbstractController
 			return $this->errorResponse('Missing or invalid request body!', Response::HTTP_BAD_REQUEST, null, 'api.errors.invalidBody');
 		}
 
+		$context = $this->denormalizationContext($classname, 'create');
+
 		try
 		{
-			$entity = $this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'create'));
+			$entity = $this->serializer->deserialize($request->getContent(), $classname, 'json', $context);
 
 			if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, 'create.after') )
 			{
@@ -496,9 +502,11 @@ class ApiController extends AbstractController
 			return $this->errorResponse('Record not found!', Response::HTTP_NOT_FOUND, null, 'api.errors.recordNotFound');
 		}
 
+		$context = $this->denormalizationContext($classname, 'update', $entity);
+
 		try
 		{
-			$this->serializer->deserialize($request->getContent(), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
+			$this->serializer->deserialize($request->getContent(), $classname, 'json', $context);
 
 			if ( $this->reauthorizesWrites() && !$this->can($authLevel, $entity, $classname, 'update.after') )
 			{
@@ -575,6 +583,9 @@ class ApiController extends AbstractController
 			}
 		}
 
+		$createContext = $this->denormalizationContext($classname, 'create');
+		$updateContext = $this->denormalizationContext($classname, 'update');
+
 		$uuids      = [];
 		$updated    = []; // managed entities, modified in place
 		$created    = []; // new entities, persisted only once every item has passed
@@ -604,7 +615,7 @@ class ApiController extends AbstractController
 
 					$updated[] = $entity;
 
-					$this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'update', $entity));
+					$this->serializer->deserialize(json_encode($data), $classname, 'json', [...$updateContext, AbstractNormalizer::OBJECT_TO_POPULATE => $entity]);
 					$operation = 'update.after';
 				}
 				else
@@ -615,7 +626,7 @@ class ApiController extends AbstractController
 						return $this->accessDeniedResponse();
 					}
 
-					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', $this->denormalizationContext($classname, 'create'));
+					$entity = $this->serializer->deserialize(json_encode($data), $classname, 'json', $createContext);
 
 					$created[] = $entity;
 					$operation = 'create.after';
@@ -736,18 +747,19 @@ class ApiController extends AbstractController
 	/**
 	 * Serializer context for turning a client payload into an entity in handleCreate(),
 	 * handleUpdate() and handleBulk(). Override it to restrict which fields a client
-	 * may write — without a restriction, every property with a setter (or public) can
-	 * be set by the payload, including ones like roles, owner or password:
+	 * may write. It must be overridden by every controller that uses these handlers:
+	 * the context has to set non-empty 'groups' (without the '*' wildcard) or 'attributes',
+	 * otherwise the handler throws a LogicException — an unrestricted payload could set
+	 * any property with a setter, including ones like roles, owner or password:
 	 *
 	 *     protected function getDenormalizationContext(string $classname, string $operation): array
 	 *     {
 	 *         return ['groups' => ['write']];
 	 *         // or: return [AbstractNormalizer::ATTRIBUTES => ['name', 'notes']];
+	 *         // or, deliberately: return [self::WRITE_ALL_FIELDS => true];
 	 *     }
 	 *
-	 * The default ([]) allows every writable property and is deprecated: from 2.0 on,
-	 * the context must set 'groups' or 'attributes'. The uuid is always ignored,
-	 * whatever this returns.
+	 * The uuid is always ignored, whatever this returns.
 	 *
 	 * @param string $classname FQCN of the entity being written.
 	 * @param string $operation 'create' | 'update'
@@ -762,16 +774,27 @@ class ApiController extends AbstractController
 	/**
 	 * Builds the full deserialization context: the subclass context from
 	 * getDenormalizationContext(), plus the always-ignored uuid and, for updates,
-	 * the entity to populate.
+	 * the entity to populate. Called before the handlers' try blocks, so a missing
+	 * restriction surfaces as an exception rather than as a generic 500 response.
+	 *
+	 * @throws LogicException If the context restricts neither groups (non-empty, without '*') nor attributes.
 	 */
 	private function denormalizationContext(string $classname, string $operation, ?object $populate = null): array
 	{
-		$context = $this->getDenormalizationContext($classname, $operation);
+		$context  = $this->getDenormalizationContext($classname, $operation);
+		$writeAll = ($context[ self::WRITE_ALL_FIELDS ] ?? false) === true;
+		unset($context[ self::WRITE_ALL_FIELDS ]);
 
-		if ( !isset($context[ AbstractNormalizer::GROUPS ]) && !isset($context[ AbstractNormalizer::ATTRIBUTES ]) && !isset($this->unrestrictedWarned[ $classname ]) )
+		// The serializer treats empty groups and the '*' group as "every field", so
+		// they don't count as a restriction. An attributes list always restricts.
+		$groups       = $context[ AbstractNormalizer::GROUPS ] ?? null;
+		$groups       = is_array($groups) || is_scalar($groups) ? (array)$groups : [];
+		$byGroups     = count($groups) > 0 && !in_array('*', $groups, true);
+		$byAttributes = is_array($context[ AbstractNormalizer::ATTRIBUTES ] ?? null);
+
+		if ( !$writeAll && !$byGroups && !$byAttributes )
 		{
-			$this->unrestrictedWarned[ $classname ] = true;
-			trigger_deprecation('pmaerksch/kohlrapi', '1.15', 'Writing "%s" without "groups" or "attributes" in getDenormalizationContext() lets clients set every writable property; this will be required in 2.0.', $classname);
+			throw new LogicException(sprintf('%s::getDenormalizationContext() must restrict the writable fields of "%s" (operation "%s"): return non-empty "groups" without "*", or "attributes", or set ApiController::WRITE_ALL_FIELDS to allow every field.', static::class, $classname, $operation));
 		}
 
 		// The uuid is server-assigned: a payload must never set or change it.

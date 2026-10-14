@@ -239,9 +239,7 @@ Its constructor is autowired with `EntityManagerInterface`, `SerializerInterface
 
 #### Writable fields
 
-`handleCreate`, `handleUpdate` and `handleBulk` deserialize the client payload straight into the entity. Without a restriction, **every property with a setter (or public) can be set by the client** — including fields like `roles`, `owner` or `password`. Only `uuid` is always ignored.
-
-Restrict the writable fields by overriding `getDenormalizationContext()` and returning serializer `groups` or `attributes`:
+`handleCreate`, `handleUpdate` and `handleBulk` deserialize the client payload straight into the entity. Without a restriction, every property with a setter (or public) could be set by the client — including fields like `roles`, `owner` or `password`. So every controller using these handlers **must** override `getDenormalizationContext()` and return serializer `groups` or `attributes`; otherwise the handler throws a `LogicException`. `uuid` is always ignored.
 
 ```php
 protected function getDenormalizationContext(string $classname, string $operation): array
@@ -252,7 +250,7 @@ protected function getDenormalizationContext(string $classname, string $operatio
 }
 ```
 
-The unrestricted default is deprecated (a deprecation is logged once per entity class) and will be rejected in 2.0.
+Empty `groups` and the `'*'` group don't count as a restriction (the serializer reads both as "every field"). To deliberately allow every field (the behaviour before 2.0), return `[self::WRITE_ALL_FIELDS => true]`.
 
 #### Authorization
 
