@@ -61,7 +61,6 @@ Abstract base entity. Extend this in all your Doctrine entities.
 
 - Auto-generated integer `id` (internal, never exposed)
 - UUID v4 generated on construction (exposed via the `uuid` serializer group)
-- `updateFromEntity()` — **deprecated, removed in 2.0.** Copies the properties except the identifiers (`id`, `uuid`) from another instance of the same class. Only `public` and `protected` properties are copied — **`private` properties (the Symfony maker default) are silently skipped.** Set the fields explicitly instead, e.g. in `updateFromJson()` via `parseJson()`
 - `parseJson($json)` — wraps a client payload (JSON string or already-decoded array) in a [`JsonHelper`](#jsonhelper) for use in `updateFromJson()` implementations
 
 ---
